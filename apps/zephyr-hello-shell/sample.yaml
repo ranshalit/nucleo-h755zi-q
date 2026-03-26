@@ -1,0 +1,18 @@
+sample:
+  description: External Hello World app with Zephyr serial shell enabled
+  name: zephyr hello shell
+tests:
+  app.zephyr_hello_shell:
+    tags:
+      - introduction
+      - shell
+    platform_allow:
+      - nucleo_h755zi_q/stm32h755xx/m7
+    harness: shell
+    filter: CONFIG_SERIAL and dt_chosen_enabled("zephyr,shell-uart")
+    harness_config:
+      shell_commands:
+        - command: "help"
+          expected: "Available commands:"
+        - command: "kernel version"
+          expected: "Zephyr version .*"
