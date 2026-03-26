@@ -1,0 +1,4 @@
+# Generated STM32CubeIDE build outputs under the checked-in STM32Cube reference tree.
+vendor/reference/stm32cubeh7/Projects/**/STM32CubeIDE/**/Debug/
+vendor/reference/stm32cubeh7/Projects/**/STM32CubeIDE/**/Release/
+vendor/reference/stm32cubeh7/Projects/**/STM32CubeIDE/**/.settings/language.settings.xml
