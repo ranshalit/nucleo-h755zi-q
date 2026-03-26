@@ -15,6 +15,9 @@ SWD_FREQ="${STM32_PROGRAMMER_SWD_FREQ:-8000}"
 PORT="${ZEPHYR_UART_PORT:-}"
 VALIDATION_RETRIES="${ZEPHYR_UART_VALIDATION_RETRIES:-3}"
 ZEPHYR_SDK_ROOT="${ZEPHYR_SDK_ROOT:-}"
+HOST_IPV4_ADDR="${ZEPHYR_HOST_IPV4_ADDR:-192.168.55.100}"
+BOARD_IPV4_ADDR="${ZEPHYR_BOARD_IPV4_ADDR:-192.168.55.2}"
+BOARD_IPV4_NETMASK="${ZEPHYR_BOARD_IPV4_NETMASK:-255.255.255.0}"
 
 DO_BUILD=1
 DO_FLASH=1
@@ -38,6 +41,9 @@ Options:
   --port PATH           Override the UART device path.
   --programmer PATH     Override the STM32_Programmer_CLI path.
   --freq KHZ            Override the SWD frequency in kHz.
+  --host-ipv4 ADDR      Override the host IPv4 address used for Ethernet validation.
+  --board-ipv4 ADDR     Override the board static IPv4 address expected by validation.
+  --board-netmask MASK  Override the board IPv4 netmask expected by validation.
   -h, --help            Show this help text.
 
 Environment overrides:
@@ -48,6 +54,9 @@ Environment overrides:
   ZEPHYR_UART_PORT
   ZEPHYR_UART_VALIDATION_RETRIES
   ZEPHYR_SDK_ROOT
+  ZEPHYR_HOST_IPV4_ADDR
+  ZEPHYR_BOARD_IPV4_ADDR
+  ZEPHYR_BOARD_IPV4_NETMASK
   STM32_PROGRAMMER_CLI
   STM32_PROGRAMMER_SWD_FREQ
 EOF
@@ -135,6 +144,21 @@ while [[ $# -gt 0 ]]; do
       [[ $# -gt 0 ]] || die "--freq requires a value"
       SWD_FREQ="$1"
       ;;
+    --host-ipv4)
+      shift
+      [[ $# -gt 0 ]] || die "--host-ipv4 requires a value"
+      HOST_IPV4_ADDR="$1"
+      ;;
+    --board-ipv4)
+      shift
+      [[ $# -gt 0 ]] || die "--board-ipv4 requires a value"
+      BOARD_IPV4_ADDR="$1"
+      ;;
+    --board-netmask)
+      shift
+      [[ $# -gt 0 ]] || die "--board-netmask requires a value"
+      BOARD_IPV4_NETMASK="$1"
+      ;;
     -h|--help)
       usage
       exit 0
@@ -204,6 +228,9 @@ validate_uart() {
   ZEPHYR_BASE="${ZEPHYR_BASE}" \
   ZEPHYR_BUILD_DIR="${BUILD_DIR}" \
   WEST_BIN="${WEST_BIN}" \
+  ZEPHYR_HOST_IPV4_ADDR="${HOST_IPV4_ADDR}" \
+  ZEPHYR_BOARD_IPV4_ADDR="${BOARD_IPV4_ADDR}" \
+  ZEPHYR_BOARD_IPV4_NETMASK="${BOARD_IPV4_NETMASK}" \
   FLASH_BEFORE_VALIDATE="${FLASH_BEFORE_VALIDATE:-0}" \
   python3 - <<'PY'
 import os
@@ -226,6 +253,9 @@ ZEPHYR_BASE = os.environ["ZEPHYR_BASE"]
 BUILD_DIR = os.environ["ZEPHYR_BUILD_DIR"]
 WEST_BIN = os.environ["WEST_BIN"]
 FLASH_BEFORE_VALIDATE = os.environ.get("FLASH_BEFORE_VALIDATE") == "1"
+HOST_IPV4_ADDR = os.environ["ZEPHYR_HOST_IPV4_ADDR"]
+BOARD_IPV4_ADDR = os.environ["ZEPHYR_BOARD_IPV4_ADDR"]
+BOARD_IPV4_NETMASK = os.environ["ZEPHYR_BOARD_IPV4_NETMASK"]
 
 def run_programmer(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
@@ -240,6 +270,30 @@ def run_programmer(*args: str, check: bool = True) -> subprocess.CompletedProces
         print(proc.stdout, end="")
         raise SystemExit(proc.returncode)
     return proc
+
+def run_host_ping(address: str, attempts: int = 3, delay_sec: float = 1.0) -> tuple[bool, str]:
+    last_output = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            proc = subprocess.run(
+                ["ping", "-c", "1", "-W", "2", address],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"ping command not found: {exc}") from exc
+
+        last_output = proc.stdout
+        if proc.returncode == 0:
+            return True, last_output
+
+        if attempt < attempts:
+            time.sleep(delay_sec)
+
+    return False, last_output
 
 def flash_build() -> None:
     env = os.environ.copy()
@@ -332,6 +386,50 @@ def run_shell_command(ser: serial.Serial, command: str, timeout_sec: float = 6.0
             time.sleep(0.05)
     return "".join(chunks)
 
+def wait_for_shell_predicate(
+    ser: serial.Serial,
+    command: str,
+    predicate,
+    attempts: int = 6,
+    delay_sec: float = 1.0,
+    timeout_sec: float = 6.0,
+) -> tuple[serial.Serial, str]:
+    last_output = ""
+    for attempt in range(1, attempts + 1):
+        ser, output = run_shell_command_resilient(ser, command, timeout_sec=timeout_sec)
+        last_output = output
+        if predicate(output):
+            return ser, output
+
+        if attempt < attempts:
+            time.sleep(delay_sec)
+
+    return ser, last_output
+
+def parse_led_state(output: str, color: str) -> str | None:
+    match = re.search(rf"{re.escape(color)}:\s+(on|off)", output)
+    if match is None:
+        return None
+    return match.group(1)
+
+def sample_led_states(
+    ser: serial.Serial,
+    color: str,
+    samples: int,
+    delay_sec: float,
+) -> tuple[serial.Serial, list[str]]:
+    states: list[str] = []
+    for index in range(samples):
+        ser, output = run_shell_command_resilient(ser, f"leds status {color}")
+        print(f"--- leds status {color} sample {index + 1} ---")
+        print(output.strip())
+        state = parse_led_state(output, color)
+        if state is not None:
+            states.append(state)
+        if index + 1 < samples:
+            time.sleep(delay_sec)
+    return ser, states
+
 def read_until_resilient(
     ser: serial.Serial,
     timeout_sec: float,
@@ -418,6 +516,29 @@ def attempt_validation(attempt: int) -> bool:
         ser, led_on_output = run_shell_command_resilient(ser, "leds on green")
         ser, led_status_output = run_shell_command_resilient(ser, "leds status green")
         ser, led_off_output = run_shell_command_resilient(ser, "leds off all")
+        ser, yellow_states = sample_led_states(ser, "yellow", samples=6, delay_sec=0.3)
+        ser, red_states = sample_led_states(ser, "red", samples=8, delay_sec=0.3)
+        ser, net_iface_output = wait_for_shell_predicate(
+            ser,
+            "net iface",
+            lambda output: (
+                "Ethernet" in output
+                and BOARD_IPV4_ADDR in output
+                and BOARD_IPV4_NETMASK in output
+            ),
+            attempts=8,
+            delay_sec=1.0,
+            timeout_sec=8.0,
+        )
+        ser, net_ping_output = wait_for_shell_predicate(
+            ser,
+            f"net ping -c 1 {HOST_IPV4_ADDR}",
+            lambda output: f"bytes from {HOST_IPV4_ADDR}" in output,
+            attempts=3,
+            delay_sec=1.0,
+            timeout_sec=10.0,
+        )
+        host_ping_ok, host_ping_output = run_host_ping(BOARD_IPV4_ADDR)
 
         print("--- prompt ---")
         print(prompt_output.strip())
@@ -431,24 +552,64 @@ def attempt_validation(attempt: int) -> bool:
         print(led_status_output.strip())
         print("--- leds off all ---")
         print(led_off_output.strip())
+        print("--- yellow blink states ---")
+        print(yellow_states)
+        print("--- red blink states ---")
+        print(red_states)
+        print("--- net iface ---")
+        print(net_iface_output.strip())
+        print(f"--- net ping {HOST_IPV4_ADDR} ---")
+        print(net_ping_output.strip())
+        print(f"--- host ping {BOARD_IPV4_ADDR} ---")
+        print(host_ping_output.strip())
 
         hello_ok = "Hello World!" in transcript
+        blink_start_ok = "Blink threads started for yellow" in transcript
         prompt_ok = "uart:~$" in transcript or "uart:~$" in prompt_output
         help_ok = "Available commands:" in help_output
         version_ok = re.search(r"Zephyr version\s+\S+", version_output) is not None
         led_on_ok = "green -> on" in led_on_output
         led_status_ok = "green: on" in led_status_output
         led_off_ok = all(token in led_off_output for token in ("green -> off", "yellow -> off", "red -> off"))
+        yellow_blink_ok = len(set(yellow_states)) > 1
+        red_blink_ok = len(set(red_states)) > 1
+        net_iface_ok = (
+            "Ethernet" in net_iface_output
+            and BOARD_IPV4_ADDR in net_iface_output
+            and BOARD_IPV4_NETMASK in net_iface_output
+        )
+        net_ping_ok = f"bytes from {HOST_IPV4_ADDR}" in net_ping_output
+        host_ping_ok = host_ping_ok
 
         print("--- summary ---")
         print(f"hello_ok={hello_ok}")
+        print(f"blink_start_ok={blink_start_ok}")
         print(f"prompt_ok={prompt_ok}")
         print(f"help_ok={help_ok}")
         print(f"version_ok={version_ok}")
         print(f"led_on_ok={led_on_ok}")
         print(f"led_status_ok={led_status_ok}")
         print(f"led_off_ok={led_off_ok}")
-        return hello_ok and prompt_ok and help_ok and version_ok and led_on_ok and led_status_ok and led_off_ok
+        print(f"yellow_blink_ok={yellow_blink_ok}")
+        print(f"red_blink_ok={red_blink_ok}")
+        print(f"net_iface_ok={net_iface_ok}")
+        print(f"net_ping_ok={net_ping_ok}")
+        print(f"host_ping_ok={host_ping_ok}")
+        return (
+            hello_ok
+            and blink_start_ok
+            and prompt_ok
+            and help_ok
+            and version_ok
+            and led_on_ok
+            and led_status_ok
+            and led_off_ok
+            and yellow_blink_ok
+            and red_blink_ok
+            and net_iface_ok
+            and net_ping_ok
+            and host_ping_ok
+        )
     except Exception as exc:
         print(f"validation attempt {attempt} failed: {exc}")
         return False
@@ -463,7 +624,7 @@ for attempt in range(1, RETRIES + 1):
     if attempt_validation(attempt):
         sys.exit(0)
 
-print("error: UART validation did not observe the expected boot and shell command responses", file=sys.stderr)
+print("error: validation did not observe the expected boot, shell, and ethernet responses", file=sys.stderr)
 sys.exit(3)
 PY
 }

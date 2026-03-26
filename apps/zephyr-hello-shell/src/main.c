@@ -8,13 +8,21 @@
 
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
 struct board_led {
 	const char *color;
 	const char *label;
 	struct gpio_dt_spec gpio;
+};
+
+enum board_led_index {
+	BOARD_LED_GREEN = 0,
+	BOARD_LED_YELLOW,
+	BOARD_LED_RED,
 };
 
 static const struct board_led board_leds[] = {
@@ -37,6 +45,36 @@ static const struct board_led board_leds[] = {
 
 static bool leds_initialized;
 static int leds_init_status;
+
+#define LED_BLINK_THREAD_STACK_SIZE 512
+#define LED_BLINK_THREAD_PRIORITY 7
+#define YELLOW_LED_BLINK_PERIOD_MS 400
+#define RED_LED_BLINK_PERIOD_MS 700
+
+K_THREAD_STACK_DEFINE(yellow_led_blink_stack, LED_BLINK_THREAD_STACK_SIZE);
+K_THREAD_STACK_DEFINE(red_led_blink_stack, LED_BLINK_THREAD_STACK_SIZE);
+
+static struct k_thread yellow_led_blink_thread;
+static struct k_thread red_led_blink_thread;
+static bool blink_threads_started;
+
+static void led_blink_thread(void *arg1, void *arg2, void *arg3)
+{
+	const struct board_led *led = arg1;
+	const int blink_period_ms = POINTER_TO_INT(arg2);
+
+	ARG_UNUSED(arg3);
+
+	while (true) {
+		int ret = gpio_pin_toggle_dt(&led->gpio);
+
+		if (ret != 0) {
+			printk("%s LED toggle failed: %d\n", led->color, ret);
+		}
+
+		k_msleep(blink_period_ms);
+	}
+}
 
 static int init_leds(void)
 {
@@ -66,6 +104,28 @@ static int init_leds(void)
 	leds_initialized = true;
 	leds_init_status = 0;
 	return 0;
+}
+
+static void start_blink_threads(void)
+{
+	if (blink_threads_started) {
+		return;
+	}
+
+	k_tid_t yellow_tid = k_thread_create(&yellow_led_blink_thread, yellow_led_blink_stack,
+					     K_THREAD_STACK_SIZEOF(yellow_led_blink_stack),
+					     led_blink_thread, (void *)&board_leds[BOARD_LED_YELLOW],
+					     INT_TO_POINTER(YELLOW_LED_BLINK_PERIOD_MS), NULL,
+					     LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
+	k_tid_t red_tid = k_thread_create(&red_led_blink_thread, red_led_blink_stack,
+					  K_THREAD_STACK_SIZEOF(red_led_blink_stack),
+					  led_blink_thread, (void *)&board_leds[BOARD_LED_RED],
+					  INT_TO_POINTER(RED_LED_BLINK_PERIOD_MS), NULL,
+					  LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
+
+	k_thread_name_set(yellow_tid, "yellow_led_blink");
+	k_thread_name_set(red_tid, "red_led_blink");
+	blink_threads_started = true;
 }
 
 static const struct board_led *find_led(const char *color)
@@ -183,7 +243,12 @@ int main(void)
 
 	if (ret != 0) {
 		printf("LED initialization failed: %d\n", ret);
+		return 0;
 	}
+
+	start_blink_threads();
+	printf("Blink threads started for yellow (%d ms) and red (%d ms)\n",
+	       YELLOW_LED_BLINK_PERIOD_MS, RED_LED_BLINK_PERIOD_MS);
 
 	return 0;
 }
