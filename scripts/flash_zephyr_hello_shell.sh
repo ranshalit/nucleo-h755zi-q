@@ -415,6 +415,9 @@ def attempt_validation(attempt: int) -> bool:
         ser, prompt_output = run_shell_command_resilient(ser, "")
         ser, help_output = run_shell_command_resilient(ser, "help")
         ser, version_output = run_shell_command_resilient(ser, "kernel version")
+        ser, led_on_output = run_shell_command_resilient(ser, "leds on green")
+        ser, led_status_output = run_shell_command_resilient(ser, "leds status green")
+        ser, led_off_output = run_shell_command_resilient(ser, "leds off all")
 
         print("--- prompt ---")
         print(prompt_output.strip())
@@ -422,18 +425,30 @@ def attempt_validation(attempt: int) -> bool:
         print(help_output.strip())
         print("--- kernel version ---")
         print(version_output.strip())
+        print("--- leds on green ---")
+        print(led_on_output.strip())
+        print("--- leds status green ---")
+        print(led_status_output.strip())
+        print("--- leds off all ---")
+        print(led_off_output.strip())
 
         hello_ok = "Hello World!" in transcript
         prompt_ok = "uart:~$" in transcript or "uart:~$" in prompt_output
         help_ok = "Available commands:" in help_output
         version_ok = re.search(r"Zephyr version\s+\S+", version_output) is not None
+        led_on_ok = "green -> on" in led_on_output
+        led_status_ok = "green: on" in led_status_output
+        led_off_ok = all(token in led_off_output for token in ("green -> off", "yellow -> off", "red -> off"))
 
         print("--- summary ---")
         print(f"hello_ok={hello_ok}")
         print(f"prompt_ok={prompt_ok}")
         print(f"help_ok={help_ok}")
         print(f"version_ok={version_ok}")
-        return hello_ok and prompt_ok and help_ok and version_ok
+        print(f"led_on_ok={led_on_ok}")
+        print(f"led_status_ok={led_status_ok}")
+        print(f"led_off_ok={led_off_ok}")
+        return hello_ok and prompt_ok and help_ok and version_ok and led_on_ok and led_status_ok and led_off_ok
     except Exception as exc:
         print(f"validation attempt {attempt} failed: {exc}")
         return False
@@ -448,7 +463,7 @@ for attempt in range(1, RETRIES + 1):
     if attempt_validation(attempt):
         sys.exit(0)
 
-print("error: UART validation did not observe Hello World and shell responses", file=sys.stderr)
+print("error: UART validation did not observe the expected boot and shell command responses", file=sys.stderr)
 sys.exit(3)
 PY
 }

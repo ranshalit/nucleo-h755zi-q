@@ -180,6 +180,12 @@ Available commands:
 ...
 uart:~$ kernel version
 Zephyr version 4.2.2
+uart:~$ leds on green
+green -> on
+uart:~$ leds off all
+green -> off
+yellow -> off
+red -> off
 ```
 
 During debugging, a temporary UART probe app that printed once per second also
