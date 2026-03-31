@@ -32,8 +32,8 @@ Build, flash, and validate the external Zephyr hello-shell app.
 Options:
   --build-only          Rebuild only.
   --flash-only          Flash only.
-  --validate-only       Validate UART output only.
-  --skip-validate       Build and/or flash without UART validation.
+  --validate-only       Validate UART, Ethernet, and HTTP behavior only.
+  --skip-validate       Build and/or flash without runtime validation.
   --build-dir PATH      Override the Zephyr build directory.
   --app-dir PATH        Override the external Zephyr app directory.
   --zephyr-base PATH    Override the Zephyr base directory.
@@ -228,11 +228,13 @@ validate_uart() {
   ZEPHYR_BASE="${ZEPHYR_BASE}" \
   ZEPHYR_BUILD_DIR="${BUILD_DIR}" \
   WEST_BIN="${WEST_BIN}" \
+  ZEPHYR_BOARD_TARGET="${BOARD}" \
   ZEPHYR_HOST_IPV4_ADDR="${HOST_IPV4_ADDR}" \
   ZEPHYR_BOARD_IPV4_ADDR="${BOARD_IPV4_ADDR}" \
   ZEPHYR_BOARD_IPV4_NETMASK="${BOARD_IPV4_NETMASK}" \
   FLASH_BEFORE_VALIDATE="${FLASH_BEFORE_VALIDATE:-0}" \
   python3 - <<'PY'
+import json
 import os
 import re
 import subprocess
@@ -252,6 +254,7 @@ RETRIES = int(os.environ["ZEPHYR_UART_VALIDATION_RETRIES"])
 ZEPHYR_BASE = os.environ["ZEPHYR_BASE"]
 BUILD_DIR = os.environ["ZEPHYR_BUILD_DIR"]
 WEST_BIN = os.environ["WEST_BIN"]
+BOARD = os.environ["ZEPHYR_BOARD_TARGET"]
 FLASH_BEFORE_VALIDATE = os.environ.get("FLASH_BEFORE_VALIDATE") == "1"
 HOST_IPV4_ADDR = os.environ["ZEPHYR_HOST_IPV4_ADDR"]
 BOARD_IPV4_ADDR = os.environ["ZEPHYR_BOARD_IPV4_ADDR"]
@@ -294,6 +297,74 @@ def run_host_ping(address: str, attempts: int = 3, delay_sec: float = 1.0) -> tu
             time.sleep(delay_sec)
 
     return False, last_output
+
+def run_host_curl(args: list[str], attempts: int = 3, delay_sec: float = 1.0) -> tuple[bool, str]:
+    last_output = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            proc = subprocess.run(
+                ["curl", "--silent", "--show-error", "--max-time", "5", *args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"curl command not found: {exc}") from exc
+
+        last_output = proc.stdout
+        if proc.returncode == 0:
+            return True, last_output
+
+        if attempt < attempts:
+            time.sleep(delay_sec)
+
+    return False, last_output
+
+def run_host_curl_sequence(
+    args: list[str], count: int, delay_sec: float = 0.5
+) -> tuple[bool, str, list[object | None]]:
+    outputs: list[str] = []
+    documents: list[object | None] = []
+
+    for index in range(count):
+        ok, output = run_host_curl(args, attempts=1, delay_sec=delay_sec)
+        outputs.append(f"sample {index + 1}: {output.strip()}")
+        if not ok:
+            return False, "\n".join(outputs), documents
+
+        documents.append(parse_json_document(output))
+
+        if index + 1 < count:
+            time.sleep(delay_sec)
+
+    return True, "\n".join(outputs), documents
+
+def parse_json_document(raw: str) -> object | None:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+def extract_led_state(document: object, color: str) -> str | None:
+    if not isinstance(document, dict):
+        return None
+
+    if isinstance(document.get("io"), dict):
+        document = document["io"]
+
+    leds = document.get("leds")
+    if not isinstance(leds, list):
+        return None
+
+    for led in leds:
+        if isinstance(led, dict) and led.get("color") == color:
+            state = led.get("state")
+            if isinstance(state, str):
+                return state
+
+    return None
 
 def flash_build() -> None:
     env = os.environ.copy()
@@ -539,6 +610,71 @@ def attempt_validation(attempt: int) -> bool:
             timeout_sec=10.0,
         )
         host_ping_ok, host_ping_output = run_host_ping(BOARD_IPV4_ADDR)
+        host_http_root_ok, host_http_root_output = run_host_curl(
+            ["--fail", f"http://{BOARD_IPV4_ADDR}/"],
+            attempts=6,
+            delay_sec=1.0,
+        )
+        host_http_status_ok, host_http_status_output = run_host_curl(
+            ["--fail", f"http://{BOARD_IPV4_ADDR}/api/v1/status"],
+            attempts=3,
+            delay_sec=1.0,
+        )
+        host_http_status_repeat_ok, host_http_status_repeat_output, host_http_status_repeat_docs = run_host_curl_sequence(
+            ["--fail", f"http://{BOARD_IPV4_ADDR}/api/v1/status"],
+            count=5,
+            delay_sec=0.5,
+        )
+        host_http_io_ok, host_http_io_output = run_host_curl(
+            ["--fail", f"http://{BOARD_IPV4_ADDR}/api/v1/io"],
+            attempts=3,
+            delay_sec=1.0,
+        )
+        host_http_led_on_ok, host_http_led_on_output = run_host_curl(
+            [
+                "--fail",
+                "-X",
+                "POST",
+                "-H",
+                "Content-Type: application/json",
+                "--data",
+                '{"led":"green","action":"on"}',
+                f"http://{BOARD_IPV4_ADDR}/api/v1/leds",
+            ],
+            attempts=3,
+            delay_sec=1.0,
+        )
+        host_http_io_after_on_ok, host_http_io_after_on_output = run_host_curl(
+            ["--fail", f"http://{BOARD_IPV4_ADDR}/api/v1/io"],
+            attempts=3,
+            delay_sec=1.0,
+        )
+        host_http_led_off_ok, host_http_led_off_output = run_host_curl(
+            [
+                "--fail",
+                "-X",
+                "POST",
+                "-H",
+                "Content-Type: application/json",
+                "--data",
+                '{"led":"green","action":"off"}',
+                f"http://{BOARD_IPV4_ADDR}/api/v1/leds",
+            ],
+            attempts=3,
+            delay_sec=1.0,
+        )
+        host_http_io_after_off_ok, host_http_io_after_off_output = run_host_curl(
+            ["--fail", f"http://{BOARD_IPV4_ADDR}/api/v1/io"],
+            attempts=3,
+            delay_sec=1.0,
+        )
+
+        host_http_status_doc = parse_json_document(host_http_status_output)
+        host_http_io_doc = parse_json_document(host_http_io_output)
+        host_http_led_on_doc = parse_json_document(host_http_led_on_output)
+        host_http_io_after_on_doc = parse_json_document(host_http_io_after_on_output)
+        host_http_led_off_doc = parse_json_document(host_http_led_off_output)
+        host_http_io_after_off_doc = parse_json_document(host_http_io_after_off_output)
 
         print("--- prompt ---")
         print(prompt_output.strip())
@@ -562,9 +698,26 @@ def attempt_validation(attempt: int) -> bool:
         print(net_ping_output.strip())
         print(f"--- host ping {BOARD_IPV4_ADDR} ---")
         print(host_ping_output.strip())
+        print(f"--- host http GET / ---")
+        print(host_http_root_output.strip())
+        print(f"--- host http GET /api/v1/status ---")
+        print(host_http_status_output.strip())
+        print(f"--- host http GET /api/v1/status repeated ---")
+        print(host_http_status_repeat_output.strip())
+        print(f"--- host http GET /api/v1/io ---")
+        print(host_http_io_output.strip())
+        print(f"--- host http POST /api/v1/leds on ---")
+        print(host_http_led_on_output.strip())
+        print(f"--- host http GET /api/v1/io after on ---")
+        print(host_http_io_after_on_output.strip())
+        print(f"--- host http POST /api/v1/leds off ---")
+        print(host_http_led_off_output.strip())
+        print(f"--- host http GET /api/v1/io after off ---")
+        print(host_http_io_after_off_output.strip())
 
         hello_ok = "Hello World!" in transcript
         blink_start_ok = "Blink threads started for yellow" in transcript
+        http_start_ok = "HTTP server listening on http://" in transcript
         prompt_ok = "uart:~$" in transcript or "uart:~$" in prompt_output
         help_ok = "Available commands:" in help_output
         version_ok = re.search(r"Zephyr version\s+\S+", version_output) is not None
@@ -580,10 +733,77 @@ def attempt_validation(attempt: int) -> bool:
         )
         net_ping_ok = f"bytes from {HOST_IPV4_ADDR}" in net_ping_output
         host_ping_ok = host_ping_ok
+        host_http_root_ok = host_http_root_ok and "STM32H7 board I/O" in host_http_root_output
+        host_http_status_ok = (
+            host_http_status_ok
+            and isinstance(host_http_status_doc, dict)
+            and host_http_status_doc.get("board") == BOARD
+            and isinstance(host_http_status_doc.get("http"), dict)
+            and host_http_status_doc["http"].get("port") == 80
+            and isinstance(host_http_status_doc.get("network"), dict)
+            and host_http_status_doc["network"].get("ipv4") == BOARD_IPV4_ADDR
+        )
+        repeated_uptimes = [
+            document.get("uptime_ms")
+            for document in host_http_status_repeat_docs
+            if isinstance(document, dict)
+        ]
+        host_http_status_repeat_ok = (
+            host_http_status_repeat_ok
+            and len(host_http_status_repeat_docs) == 5
+            and all(isinstance(document, dict) for document in host_http_status_repeat_docs)
+            and all(document.get("board") == BOARD for document in host_http_status_repeat_docs if isinstance(document, dict))
+            and all(
+                isinstance(document.get("network"), dict)
+                and document["network"].get("ipv4") == BOARD_IPV4_ADDR
+                for document in host_http_status_repeat_docs
+                if isinstance(document, dict)
+            )
+            and all(
+                extract_led_state(document, "yellow") in {"on", "off"}
+                and extract_led_state(document, "red") in {"on", "off"}
+                for document in host_http_status_repeat_docs
+            )
+            and len(repeated_uptimes) == 5
+            and all(isinstance(uptime, int) for uptime in repeated_uptimes)
+            and all(
+                repeated_uptimes[index] <= repeated_uptimes[index + 1]
+                for index in range(len(repeated_uptimes) - 1)
+            )
+        )
+        host_http_io_ok = (
+            host_http_io_ok
+            and isinstance(host_http_io_doc, dict)
+            and isinstance(host_http_io_doc.get("button"), dict)
+            and extract_led_state(host_http_io_doc, "green") in {"on", "off"}
+        )
+        host_http_led_on_ok = (
+            host_http_led_on_ok
+            and isinstance(host_http_led_on_doc, dict)
+            and host_http_led_on_doc.get("action") == "on"
+            and extract_led_state(host_http_led_on_doc, "green") == "on"
+        )
+        host_http_io_after_on_ok = (
+            host_http_io_after_on_ok
+            and isinstance(host_http_io_after_on_doc, dict)
+            and extract_led_state(host_http_io_after_on_doc, "green") == "on"
+        )
+        host_http_led_off_ok = (
+            host_http_led_off_ok
+            and isinstance(host_http_led_off_doc, dict)
+            and host_http_led_off_doc.get("action") == "off"
+            and extract_led_state(host_http_led_off_doc, "green") == "off"
+        )
+        host_http_io_after_off_ok = (
+            host_http_io_after_off_ok
+            and isinstance(host_http_io_after_off_doc, dict)
+            and extract_led_state(host_http_io_after_off_doc, "green") == "off"
+        )
 
         print("--- summary ---")
         print(f"hello_ok={hello_ok}")
         print(f"blink_start_ok={blink_start_ok}")
+        print(f"http_start_ok={http_start_ok}")
         print(f"prompt_ok={prompt_ok}")
         print(f"help_ok={help_ok}")
         print(f"version_ok={version_ok}")
@@ -595,9 +815,18 @@ def attempt_validation(attempt: int) -> bool:
         print(f"net_iface_ok={net_iface_ok}")
         print(f"net_ping_ok={net_ping_ok}")
         print(f"host_ping_ok={host_ping_ok}")
+        print(f"host_http_root_ok={host_http_root_ok}")
+        print(f"host_http_status_ok={host_http_status_ok}")
+        print(f"host_http_status_repeat_ok={host_http_status_repeat_ok}")
+        print(f"host_http_io_ok={host_http_io_ok}")
+        print(f"host_http_led_on_ok={host_http_led_on_ok}")
+        print(f"host_http_io_after_on_ok={host_http_io_after_on_ok}")
+        print(f"host_http_led_off_ok={host_http_led_off_ok}")
+        print(f"host_http_io_after_off_ok={host_http_io_after_off_ok}")
         return (
             hello_ok
             and blink_start_ok
+            and http_start_ok
             and prompt_ok
             and help_ok
             and version_ok
@@ -609,6 +838,14 @@ def attempt_validation(attempt: int) -> bool:
             and net_iface_ok
             and net_ping_ok
             and host_ping_ok
+            and host_http_root_ok
+            and host_http_status_ok
+            and host_http_status_repeat_ok
+            and host_http_io_ok
+            and host_http_led_on_ok
+            and host_http_io_after_on_ok
+            and host_http_led_off_ok
+            and host_http_io_after_off_ok
         )
     except Exception as exc:
         print(f"validation attempt {attempt} failed: {exc}")
@@ -624,7 +861,7 @@ for attempt in range(1, RETRIES + 1):
     if attempt_validation(attempt):
         sys.exit(0)
 
-print("error: validation did not observe the expected boot, shell, and ethernet responses", file=sys.stderr)
+print("error: validation did not observe the expected boot, shell, ethernet, and HTTP responses", file=sys.stderr)
 sys.exit(3)
 PY
 }

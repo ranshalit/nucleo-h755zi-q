@@ -6,189 +6,69 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <zephyr/devicetree.h>
-#include <zephyr/drivers/gpio.h>
-#include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
-#include <zephyr/sys/printk.h>
-#include <zephyr/sys/util.h>
 
-struct board_led {
-	const char *color;
-	const char *label;
-	struct gpio_dt_spec gpio;
-};
+#include "board_io.h"
+#include "http_server.h"
 
-enum board_led_index {
-	BOARD_LED_GREEN = 0,
-	BOARD_LED_YELLOW,
-	BOARD_LED_RED,
-};
-
-static const struct board_led board_leds[] = {
-	{
-		.color = "green",
-		.label = "LD1",
-		.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(green_led), gpios),
-	},
-	{
-		.color = "yellow",
-		.label = "LD2",
-		.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(yellow_led), gpios),
-	},
-	{
-		.color = "red",
-		.label = "LD3",
-		.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(red_led), gpios),
-	},
-};
-
-static bool leds_initialized;
-static int leds_init_status;
-
-#define LED_BLINK_THREAD_STACK_SIZE 512
-#define LED_BLINK_THREAD_PRIORITY 7
-#define YELLOW_LED_BLINK_PERIOD_MS 400
-#define RED_LED_BLINK_PERIOD_MS 700
-
-K_THREAD_STACK_DEFINE(yellow_led_blink_stack, LED_BLINK_THREAD_STACK_SIZE);
-K_THREAD_STACK_DEFINE(red_led_blink_stack, LED_BLINK_THREAD_STACK_SIZE);
-
-static struct k_thread yellow_led_blink_thread;
-static struct k_thread red_led_blink_thread;
-static bool blink_threads_started;
-
-static void led_blink_thread(void *arg1, void *arg2, void *arg3)
+static int print_led_state(const struct shell *shell, enum board_led_id led_id, const char *separator)
 {
-	const struct board_led *led = arg1;
-	const int blink_period_ms = POINTER_TO_INT(arg2);
-
-	ARG_UNUSED(arg3);
-
-	while (true) {
-		int ret = gpio_pin_toggle_dt(&led->gpio);
-
-		if (ret != 0) {
-			printk("%s LED toggle failed: %d\n", led->color, ret);
-		}
-
-		k_msleep(blink_period_ms);
-	}
-}
-
-static int init_leds(void)
-{
+	const struct board_led_info *led = board_led_info_get(led_id);
+	bool is_on;
 	int ret;
 
-	if (leds_initialized) {
-		return leds_init_status;
-	}
-
-	for (size_t i = 0; i < ARRAY_SIZE(board_leds); ++i) {
-		if (!gpio_is_ready_dt(&board_leds[i].gpio)) {
-			leds_initialized = true;
-			leds_init_status = -ENODEV;
-			return leds_init_status;
-		}
-	}
-
-	for (size_t i = 0; i < ARRAY_SIZE(board_leds); ++i) {
-		ret = gpio_pin_configure_dt(&board_leds[i].gpio, GPIO_OUTPUT_INACTIVE);
-		if (ret != 0) {
-			leds_initialized = true;
-			leds_init_status = ret;
-			return ret;
-		}
-	}
-
-	leds_initialized = true;
-	leds_init_status = 0;
-	return 0;
-}
-
-static void start_blink_threads(void)
-{
-	if (blink_threads_started) {
-		return;
-	}
-
-	k_tid_t yellow_tid = k_thread_create(&yellow_led_blink_thread, yellow_led_blink_stack,
-					     K_THREAD_STACK_SIZEOF(yellow_led_blink_stack),
-					     led_blink_thread, (void *)&board_leds[BOARD_LED_YELLOW],
-					     INT_TO_POINTER(YELLOW_LED_BLINK_PERIOD_MS), NULL,
-					     LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
-	k_tid_t red_tid = k_thread_create(&red_led_blink_thread, red_led_blink_stack,
-					  K_THREAD_STACK_SIZEOF(red_led_blink_stack),
-					  led_blink_thread, (void *)&board_leds[BOARD_LED_RED],
-					  INT_TO_POINTER(RED_LED_BLINK_PERIOD_MS), NULL,
-					  LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
-
-	k_thread_name_set(yellow_tid, "yellow_led_blink");
-	k_thread_name_set(red_tid, "red_led_blink");
-	blink_threads_started = true;
-}
-
-static const struct board_led *find_led(const char *color)
-{
-	for (size_t i = 0; i < ARRAY_SIZE(board_leds); ++i) {
-		if (strcmp(board_leds[i].color, color) == 0) {
-			return &board_leds[i];
-		}
-	}
-
-	return NULL;
-}
-
-static int print_led_state(const struct shell *shell, const struct board_led *led, const char *separator)
-{
-	int value = gpio_pin_get_dt(&led->gpio);
-
-	if (value < 0) {
-		shell_error(shell, "%s state read failed: %d", led->color, value);
-		return value;
-	}
-
-	shell_print(shell, "%s%s%s", led->color, separator, value ? "on" : "off");
-	return 0;
-}
-
-static int apply_led_action(const struct shell *shell, const struct board_led *led, const char *action)
-{
-	int ret;
-
-	if (strcmp(action, "on") == 0) {
-		ret = gpio_pin_set_dt(&led->gpio, 1);
-	} else if (strcmp(action, "off") == 0) {
-		ret = gpio_pin_set_dt(&led->gpio, 0);
-	} else if (strcmp(action, "toggle") == 0) {
-		ret = gpio_pin_toggle_dt(&led->gpio);
-	} else {
+	if (led == NULL) {
+		shell_error(shell, "unknown LED index %d", led_id);
 		return -EINVAL;
 	}
 
+	ret = board_led_get(led_id, &is_on);
+	if (ret != 0) {
+		shell_error(shell, "%s state read failed: %d", led->color, ret);
+		return ret;
+	}
+
+	shell_print(shell, "%s%s%s", led->color, separator, is_on ? "on" : "off");
+	return 0;
+}
+
+static int apply_led_action(const struct shell *shell, enum board_led_id led_id, const char *action)
+{
+	const struct board_led_info *led = board_led_info_get(led_id);
+	bool is_on;
+	int ret;
+
+	if (led == NULL) {
+		shell_error(shell, "unknown LED index %d", led_id);
+		return -EINVAL;
+	}
+
+	ret = board_led_apply_action(led_id, action, &is_on);
 	if (ret != 0) {
 		shell_error(shell, "%s %s failed: %d", action, led->color, ret);
 		return ret;
 	}
 
-	return print_led_state(shell, led, " -> ");
+	shell_print(shell, "%s -> %s", led->color, is_on ? "on" : "off");
+	return 0;
 }
 
 static int with_selected_leds(const struct shell *shell, const char *selection,
-			      int (*callback)(const struct shell *shell, const struct board_led *led,
+			      int (*callback)(const struct shell *shell, enum board_led_id led_id,
 					      const char *arg),
 			      const char *arg)
 {
-	int ret = init_leds();
+	int ret;
 
+	ret = board_io_init();
 	if (ret != 0) {
-		shell_error(shell, "LED initialization failed: %d", ret);
+		shell_error(shell, "board I/O initialization failed: %d", ret);
 		return ret;
 	}
 
 	if (strcmp(selection, "all") == 0) {
-		for (size_t i = 0; i < ARRAY_SIZE(board_leds); ++i) {
-			ret = callback(shell, &board_leds[i], arg);
+		for (enum board_led_id led_id = BOARD_LED_GREEN; led_id < BOARD_LED_COUNT; ++led_id) {
+			ret = callback(shell, led_id, arg);
 			if (ret != 0) {
 				return ret;
 			}
@@ -197,14 +77,16 @@ static int with_selected_leds(const struct shell *shell, const char *selection,
 		return 0;
 	}
 
-	const struct board_led *led = find_led(selection);
+	enum board_led_id led_id;
 
-	if (led == NULL) {
-		shell_error(shell, "unknown LED color '%s'; use green, yellow, red, or all", selection);
-		return -EINVAL;
+	ret = board_led_find(selection, &led_id);
+	if (ret != 0) {
+		shell_error(shell, "unknown LED color '%s'; use green, yellow, red, or all",
+			    selection);
+		return ret;
 	}
 
-	return callback(shell, led, arg);
+	return callback(shell, led_id, arg);
 }
 
 static int cmd_led_action(const struct shell *shell, size_t argc, char **argv)
@@ -237,18 +119,33 @@ SHELL_CMD_REGISTER(leds, &sub_leds, "Control the user LEDs (LD1/LD2/LD3)", NULL)
 
 int main(void)
 {
-	int ret = init_leds();
+	int ret = board_io_init();
 
 	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
 
 	if (ret != 0) {
-		printf("LED initialization failed: %d\n", ret);
-		return 0;
+		printf("Board I/O initialization failed: %d\n", ret);
+		return ret;
 	}
 
-	start_blink_threads();
-	printf("Blink threads started for yellow (%d ms) and red (%d ms)\n",
-	       YELLOW_LED_BLINK_PERIOD_MS, RED_LED_BLINK_PERIOD_MS);
+	ret = board_blink_threads_start();
+	if (ret != 0) {
+		printf("Blink thread startup failed: %d\n", ret);
+		return ret;
+	}
+
+	printf("Blink threads started for yellow (%u ms) and red (%u ms)\n",
+	       board_led_info_get(BOARD_LED_YELLOW)->blink_period_ms,
+	       board_led_info_get(BOARD_LED_RED)->blink_period_ms);
+
+	ret = board_http_server_start();
+	if (ret != 0) {
+		printf("HTTP server startup failed: %d\n", ret);
+		return ret;
+	}
+
+	printf("HTTP server listening on http://%s:%u/\n",
+	       CONFIG_NET_CONFIG_MY_IPV4_ADDR, board_http_server_port());
 
 	return 0;
 }

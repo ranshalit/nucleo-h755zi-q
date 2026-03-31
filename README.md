@@ -49,6 +49,16 @@ The repo-owned Zephyr application is:
 It keeps the application and shell configuration in this repository instead of
 patching the upstream Zephyr source tree under `vendor/zephyrproject/zephyr`.
 
+At runtime, the application starts two Zephyr threads: one toggles the yellow
+LED (LD2) and the other toggles the red LED (LD3). The green LED (LD1) remains
+available through the serial shell commands. The same application now also runs
+a plain HTTP server on the board Ethernet interface and exposes built-in board
+I/O through both JSON API endpoints and a browser dashboard:
+
+- LEDs `LD1`, `LD2`, `LD3`
+- user button `B1`
+- board and network status
+
 ### Build
 
 ```bash
@@ -107,6 +117,8 @@ With the programmed image running, `/dev/ttyACM0` at `115200 8N1` should show:
 ```text
 *** Booting Zephyr OS build v4.2.2 ***
 Hello World! nucleo_h755zi_q/stm32h755xx/m7
+Blink threads started for yellow (400 ms) and red (700 ms)
+HTTP server listening on http://192.168.55.2:80/
 
 uart:~$
 ```
@@ -126,6 +138,96 @@ green -> off
 yellow -> off
 red -> off
 ```
+
+Yellow and red should continue blinking independently after boot, and
+`scripts/flash_zephyr_hello_shell.sh` now validates that behavior by sampling
+their shell-reported states over time on the connected board.
+
+### Ethernet validation
+
+The Zephyr app also enables the on-board Ethernet MAC/PHY with a static IPv4
+address:
+
+- board: `192.168.55.2/24`
+- host: `192.168.55.100/24`
+
+With the cable connected and link up, the serial shell should show the Ethernet
+interface and the static address:
+
+```text
+uart:~$ net iface
+...
+Interface ... (Ethernet)
+...
+IPv4 unicast addresses (max ...):
+        192.168.55.2 manual preferred infinite
+IPv4 netmask : 255.255.255.0
+```
+
+The board should be able to ping the host:
+
+```text
+uart:~$ net ping -c 1 192.168.55.100
+PING 192.168.55.100
+... bytes from 192.168.55.100 to 192.168.55.2 ...
+```
+
+And the host should be able to ping the board:
+
+```bash
+ping -c 1 192.168.55.2
+```
+
+`scripts/flash_zephyr_hello_shell.sh` now includes those Ethernet checks during
+validation. Override the defaults with `--host-ipv4`, `--board-ipv4`, and
+`--board-netmask` if your lab network uses different addresses.
+
+### HTTP validation
+
+With Ethernet link up, the board also serves HTTP on the same static IPv4
+address:
+
+- browser dashboard: `http://192.168.55.2/`
+- board/network status: `http://192.168.55.2/api/v1/status`
+- current button/LED state: `http://192.168.55.2/api/v1/io`
+- LED control: `POST http://192.168.55.2/api/v1/leds`
+- dashboard assets: `http://192.168.55.2/styles.css` and `http://192.168.55.2/app.js`
+
+The dashboard uses a high-contrast dark color scheme and JavaScript polling to
+show:
+
+- live board/network status
+- current user-button state
+- live LED state cards
+- per-LED `On`, `Off`, and `Toggle` controls from the browser
+
+Example host-side checks:
+
+```bash
+curl --fail http://192.168.55.2/
+curl --fail http://192.168.55.2/api/v1/status
+curl --fail http://192.168.55.2/api/v1/io
+curl --fail \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"led":"green","action":"on"}' \
+  http://192.168.55.2/api/v1/leds
+curl --fail \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"led":"green","action":"off"}' \
+  http://192.168.55.2/api/v1/leds
+```
+
+The HTTP API is scoped to built-in board I/O only in this first version. Yellow
+and red remain under their background blink threads, so HTTP writes to those
+LEDs are observable immediately but may be superseded by the next blink toggle.
+Green is the stable LED used by the validation flow for deterministic write/read
+checks. The dashboard reflects that same behavior: yellow and red are live but
+can change again on their own because of the background blink threads.
+
+`scripts/flash_zephyr_hello_shell.sh` now validates the HTTP endpoints in
+addition to the existing boot, shell, and Ethernet checks.
 
 ## STM32CubeIDE reference build
 
@@ -190,6 +292,7 @@ scripts/flash_gpio_demo.sh --config Release
 
 ## History
 - agent help with git
+- verify in hw
 - agent serial was good - no need for skill
 - pdf to md
 - download zrphyr in build
@@ -197,3 +300,8 @@ scripts/flash_gpio_demo.sh --config Release
 - root cause: building Zephyr with a local Xilinx/PetaLinux `arm-none-eabi`
   toolchain produced an image that faulted during early UART init
 - rebuilding with the official Zephyr SDK `arm-zephyr-eabi` toolchain fixed it
+- move app outside
+- add leds in cli
+- add 2 process leds
+- add ip
+- add heep server

@@ -1,5 +1,5 @@
 sample:
-  description: External Hello World app with Zephyr serial shell enabled
+  description: External Hello World app with Zephyr serial shell and HTTP board I/O server
   name: zephyr hello shell
 tests:
   app.zephyr_hello_shell:
