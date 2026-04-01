@@ -25,8 +25,8 @@
 #include "web_assets.h"
 
 #define BOARD_HTTP_PORT 80U
-#define JSON_RESPONSE_BUF_SIZE 3072
-#define LED_POST_BUF_SIZE 96
+#define JSON_RESPONSE_BUF_SIZE 1024
+#define LED_POST_BUF_SIZE 64
 
 struct led_command {
 	char led[16];
@@ -288,7 +288,7 @@ static int build_status_json(char *buffer, size_t buffer_len)
 	char ipv4_addr[NET_IPV4_ADDR_LEN];
 	char netmask[NET_IPV4_ADDR_LEN];
 	char gateway[NET_IPV4_ADDR_LEN];
-	static char io_json[JSON_RESPONSE_BUF_SIZE];
+	static char __noinit io_json[JSON_RESPONSE_BUF_SIZE];
 	struct in_addr *iface_addr = NULL;
 	struct in_addr iface_netmask = { 0 };
 	struct in_addr iface_gateway = { 0 };
@@ -358,8 +358,8 @@ static int build_led_action_json(char *buffer, size_t buffer_len, const char *se
 
 static int build_dashboard_json(char *buffer, size_t buffer_len)
 {
-	static char status_json[JSON_RESPONSE_BUF_SIZE];
-	static char io_json[JSON_RESPONSE_BUF_SIZE];
+	static char __noinit status_json[JSON_RESPONSE_BUF_SIZE];
+	static char __noinit io_json[JSON_RESPONSE_BUF_SIZE];
 	int status_len;
 	int io_len;
 	int ret;
@@ -434,7 +434,7 @@ static int status_handler(struct http_client_ctx *client, enum http_data_status 
 			  const struct http_request_ctx *request_ctx,
 			  struct http_response_ctx *response_ctx, void *user_data)
 {
-	static char status_response[JSON_RESPONSE_BUF_SIZE];
+	static char __noinit status_response[JSON_RESPONSE_BUF_SIZE];
 	int ret;
 
 	ARG_UNUSED(client);
@@ -470,7 +470,7 @@ static int io_handler(struct http_client_ctx *client, enum http_data_status stat
 		      const struct http_request_ctx *request_ctx,
 		      struct http_response_ctx *response_ctx, void *user_data)
 {
-	static char io_response[JSON_RESPONSE_BUF_SIZE];
+	static char __noinit io_response[JSON_RESPONSE_BUF_SIZE];
 	int ret;
 
 	ARG_UNUSED(client);
@@ -505,7 +505,7 @@ static int dashboard_handler(struct http_client_ctx *client, enum http_data_stat
 			     const struct http_request_ctx *request_ctx,
 			     struct http_response_ctx *response_ctx, void *user_data)
 {
-	static char dashboard_response[JSON_RESPONSE_BUF_SIZE];
+	static char __noinit dashboard_response[JSON_RESPONSE_BUF_SIZE];
 	int ret;
 
 	ARG_UNUSED(client);
@@ -566,8 +566,8 @@ static int leds_handler(struct http_client_ctx *client, enum http_data_status st
 			const struct http_request_ctx *request_ctx,
 			struct http_response_ctx *response_ctx, void *user_data)
 {
-	static char response_buffer[JSON_RESPONSE_BUF_SIZE];
-	static uint8_t post_buffer[LED_POST_BUF_SIZE];
+	static char __noinit response_buffer[JSON_RESPONSE_BUF_SIZE];
+	static uint8_t __noinit post_buffer[LED_POST_BUF_SIZE];
 	static size_t cursor;
 	struct led_command cmd = { 0 };
 	const int expected_parse_mask = BIT_MASK(ARRAY_SIZE(led_command_descr));
