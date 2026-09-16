@@ -11,6 +11,18 @@
 #include "board_io.h"
 #include "http_server.h"
 
+static int cmd_version(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(shell, "zephyr-hello-shell");
+	shell_print(shell, "Build time: %s", APP_BUILD_TIMESTAMP);
+	return 0;
+}
+
+SHELL_CMD_REGISTER(version, NULL, "Show application build information", cmd_version);
+
 static int print_led_state(const struct shell *shell, enum board_led_id led_id, const char *separator)
 {
 	const struct board_led_info *led = board_led_info_get(led_id);
@@ -122,6 +134,7 @@ int main(void)
 	int ret = board_io_init();
 
 	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
+	printf("Build time: %s\n", APP_BUILD_TIMESTAMP);
 
 	if (ret != 0) {
 		printf("Board I/O initialization failed: %d\n", ret);
