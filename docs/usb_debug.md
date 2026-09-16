@@ -1567,3 +1567,32 @@ test firmware, not the project's normal Host-mode
 `apps/zephyr-hello-shell` image. Re-flash
 `scripts/flash_zephyr_hello_shell.sh` to restore the normal Host-mode
 application when resuming host-mode debugging.
+
+## Step 27: Why the CN12 ID jumper didn't matter for the Device-mode test
+
+User asked a sharp follow-up: the CN12 pin33↔39 ID-ground jumper (Step
+18) was never removed, yet the stock Device-mode test in Step 26 still
+worked. How?
+
+Answer, confirmed directly in HAL source
+(`stm32h7xx_ll_usb.c:USB_SetCurrentMode()`):
+
+```c
+USBx->GUSBCFG &= ~(USB_OTG_GUSBCFG_FHMOD | USB_OTG_GUSBCFG_FDMOD);
+if (mode == USB_HOST_MODE)   { USBx->GUSBCFG |= USB_OTG_GUSBCFG_FHMOD; }
+else if (mode == USB_DEVICE_MODE) { USBx->GUSBCFG |= USB_OTG_GUSBCFG_FDMOD; }
+```
+
+Both our custom Host-mode code and Zephyr's stock `cdc_acm` Device-mode
+sample call this same function, which **unconditionally forces** the
+OTG core into host or device role via the `FHMOD`/`FDMOD` bits in
+`GUSBCFG` — the analog ID-pin comparator (`GOTGCTL.CIDSTS`) is never
+read or branched on by either code path. ID-pin-based role detection
+only matters for genuine dual-role OTG negotiation (SRP/HNP), which
+neither firmware implements.
+
+This is consistent with the Step 14 finding that `FHMOD` latches even
+while `CIDSTS=1`. It confirms the CN12 ID jumper has **no effect on
+mode selection in this codebase, in either direction** — it may be
+left in place or removed with no expected change to either the Host-
+or Device-mode firmware's behavior.
