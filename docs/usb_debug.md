@@ -1119,3 +1119,29 @@ diagnostic boundary is the physical USB data path:
    J-state, reset SE0, packet activity, and signal integrity on both data
    lines. A normal logic analyzer is not sufficient for reliable USB FS
    protocol diagnosis.
+
+A newly connected third USB device was then tested without rebuilding or
+changing firmware. After the known 30-45 second HCD initialization window,
+it produced the same result:
+
+```text
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: wait_for_attachment
+control_state: error
+connected: 1
+port_enabled: 1
+
+ST USBH: pipe 0 URB=4 HC_state=2
+HCTSIZ=0x60080008 HCCHAR=0x20100040
+HPRT=0x00021405 PA9=1 PG7_nFAULT=1
+
+usbhost descriptor
+no valid device descriptor
+```
+
+Thus three different USB devices have failed at the same first SETUP
+transaction, and the latest two-device comparison uses ST's complete host
+middleware. This further rules out device-specific behavior and strengthens
+the case for investigating the common board/cable/PHY data path.
