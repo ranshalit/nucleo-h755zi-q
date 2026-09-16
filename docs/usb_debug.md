@@ -1145,3 +1145,26 @@ Thus three different USB devices have failed at the same first SETUP
 transaction, and the latest two-device comparison uses ST's complete host
 middleware. This further rules out device-specific behavior and strengthens
 the case for investigating the common board/cable/PHY data path.
+
+## Step 20 — Visual solder-bridge inspection: factory routing confirmed correct
+
+A photograph of the board's solder-bridge silkscreen (bottom side) was
+reviewed against the MB1363 default-configuration mapping already recorded
+in this document (Step 16/18):
+
+- `SB21` (PA9/VBUS): populated (0R bridge fitted).
+- `SB26` (PA11/DM): populated.
+- `SB27` (PA12/DP): populated.
+- `SB29` (PA10/ID): populated.
+
+All four are shown fitted from manufacture, matching UM2408's documented
+default for USER USB (CN13) operation. This rules out an **unpopulated**
+solder bridge as the explanation for the persistent SETUP STALL. It does
+not rule out a cold/cracked joint or a trace-level defect under a
+populated bridge, since that cannot be confirmed from a photograph — only
+multimeter continuity/resistance measurement or reflow can confirm that.
+
+Updated next step: since population is confirmed correct, prioritize
+continuity measurement (bridge-to-connector-to-MCU pin) over resoldering,
+and treat a USB protocol analyzer/scope capture as the next
+highest-value action if continuity measures good.
