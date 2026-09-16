@@ -38,6 +38,7 @@ int board_usb_host_start(void)
 				      usb_host_poll_loop, NULL, NULL, NULL,
 				      USB_HOST_POLL_THREAD_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(tid, "usb_host_poll");
+	usb_host_init_result = 0;
 
 	return 0;
 }
@@ -46,6 +47,9 @@ static int cmd_usbhost_status(const struct shell *shell, size_t argc, char **arg
 {
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
+
+	shell_print(shell, "PA10_IDR: %d", stm32_hcd_adapter_id_pin_level());
+	shell_print(shell, "CIDSTS: %d", stm32_hcd_adapter_id_status());
 
 	if (usb_host_init_result != 0) {
 		shell_error(shell, "usb host init failed: %d", usb_host_init_result);

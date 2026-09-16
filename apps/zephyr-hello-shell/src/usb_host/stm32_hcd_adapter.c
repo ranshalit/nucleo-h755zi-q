@@ -336,9 +336,10 @@ int stm32_hcd_adapter_init(void)
 	 * records the physical ID state while separately checking whether the
 	 * software force-host bit latches and whether CMOD follows it.
 	 */
-	printf("usbhost: GOTGCTL=0x%08lx (CIDSTS=%lu, %s)\n",
+	printf("usbhost: GOTGCTL=0x%08lx (CIDSTS=%lu, PA10_IDR=%lu, %s)\n",
 	       (unsigned long)hcd_handle.Instance->GOTGCTL,
 	       (unsigned long)((hcd_handle.Instance->GOTGCTL & USB_OTG_GOTGCTL_CIDSTS) != 0),
+	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_10),
 	       (hcd_handle.Instance->GOTGCTL & USB_OTG_GOTGCTL_CIDSTS) ?
 		       "B-device/ID-high/NOT-grounded" : "A-device/ID-low/grounded");
 
@@ -410,6 +411,16 @@ int stm32_hcd_adapter_init(void)
 struct usb_enumerator *stm32_hcd_adapter_enumerator(void)
 {
 	return &enumerator;
+}
+
+int stm32_hcd_adapter_id_pin_level(void)
+{
+	return LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_10) ? 1 : 0;
+}
+
+int stm32_hcd_adapter_id_status(void)
+{
+	return (hcd_handle.Instance->GOTGCTL & USB_OTG_GOTGCTL_CIDSTS) ? 1 : 0;
 }
 
 void stm32_hcd_adapter_poll(void)

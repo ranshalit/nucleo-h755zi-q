@@ -11,6 +11,8 @@ extern "C" {
 int stm32_hcd_adapter_init(void);
 struct usb_enumerator *stm32_hcd_adapter_enumerator(void);
 void stm32_hcd_adapter_poll(void);
+int stm32_hcd_adapter_id_pin_level(void);
+int stm32_hcd_adapter_id_status(void);
 
 #ifdef __cplusplus
 }

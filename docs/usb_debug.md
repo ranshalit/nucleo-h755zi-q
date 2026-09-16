@@ -980,3 +980,29 @@ This rules out a camera-specific refusal. The common failure is in the
 board/cable/PHY host path. Because `CIDSTS` remains high for both devices and
 neither GPIO output-low nor an internal PA10 pull-down can change it, a
 physical ID-low test is now the highest-value next step.
+
+## Step 18 — Physical ID grounding verified; SETUP STALL unchanged
+
+With power removed, CN12 pin 33 (`PA10`/USB ID) was jumpered to CN12 pin 39
+(digital ground). Firmware diagnostics were extended so `usbhost status`
+reports both the GPIO input and OTG ID status.
+
+Fresh hardware result:
+
+```text
+PA10_IDR: 0
+CIDSTS: 0
+state: error
+error: xfer_stall
+```
+
+At the earliest pre-core diagnostic, `PA10_IDR=0` already proved the jumper
+was physically connected while `CIDSTS` still held its reset/stale value of
+1. After OTG initialization, repeated shell reads showed `CIDSTS=0`, proving
+the OTG block eventually recognized the grounded ID input.
+
+Enumeration nevertheless produced the same three endpoint-zero SETUP
+`URB_STALL` results. Therefore physical ID-high is conclusively **not** the
+cause of the current failure. The jumper may be removed; further diagnosis
+should focus on the transmitted SETUP packet/signal path using a USB protocol
+analyzer or comparison with ST's complete USB Host middleware.
