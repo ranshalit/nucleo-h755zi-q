@@ -1341,3 +1341,80 @@ path between the connector and PA11/PA12, or a damaged internal
 transceiver — not anything discoverable by further code/config review.
 An external oscilloscope or protocol analyzer capture at the physical
 test points remains the next authoritative step.
+
+## Step 24: Direct evidence — this exact board successfully hosts USB in ST Community
+
+Requested: search community.st.com for a similar issue. Approach:
+`search.brave.com` was rate-limited (429) for the entire session this
+time, and every other public search engine tried (Bing, DuckDuckGo,
+Ecosia, Mojeek, Startpage, Yandex, marginalia, multiple SearXNG
+instances) was blocked, JS-gated, or unusable for scripted queries.
+Worked around this by downloading ST Community's own `sitemap-topics-
+{1..4}.xml` (~26 MB total, ~163k thread URLs) directly and grepping
+locally for USB host/H745/H755-related thread slugs.
+
+Found: **`usb-host-on-stm32h755zi-q-cdc-class-not-detected-for-usb-to-
+ttl-device-154603`** — same exact board (STM32H755ZI-Q Nucleo), same
+exact mode (USB Host). The poster reports:
+
+> "I've successfully tested the USB Host functionality using standard
+> USB devices such as a keyboard and a mouse, both of which are
+> recognized correctly by the host."
+
+And for a CH340 USB-to-TTL adapter (VID 1a86h), their log shows a
+**fully successful enumeration**: address assigned, manufacturer/
+product descriptor strings read, configuration set, "Enumeration
+done." Their only remaining issue is "No registered class for this
+device" — i.e., missing CDC class driver registration, a much later
+and purely software/class-support gap, not an electrical/protocol
+failure.
+
+Other near-miss threads checked and ruled out as not applicable:
+- `usb-host-stall-96907` (2015, F407 Discovery): an old MW USB Host
+  library bug where `USBH_HandleControl`'s `CTRL_DATA_IN_WAIT` case
+  loops forever on `USBH_URB_STALL` instead of returning to the
+  previous state. Different symptom (software hang on STALL vs. our
+  clean but consistently negative STALL/ERROR response) and a much
+  older/different library version; not applicable.
+- `stm32h743-usb-otg-fs-not-responding-to-core-reset-79012`: `GRSTCTL_
+  CSRST` (core soft reset) never self-clears on a Nucleo-H743. Different
+  failure point (core reset itself times out during `HAL_PCD_Init`,
+  before any device is even attached) — we get well past core reset,
+  VBUS enable, ID-pin detection, and port-enable in our case, so not
+  applicable.
+- `problem-with-usb-otg-again-144246` (checked in a prior request):
+  H723ZG **Device**-mode VCP with a custom no-VBUS-wire cable; unrelated
+  failure mode.
+
+### Why this matters — re-evaluating the "ST-unsupported" theory
+
+Step 21 concluded that the total absence of an official CubeH7
+`Applications/USB_Host` example for any Nucleo-144 H7 board hinted that
+USER USB host mode might be an ST-unvalidated use case on this hardware
+family. **This new evidence weakens that theory significantly**: a
+different user, on the identical board (H755ZI-Q), using the identical
+USER USB connector in host mode, gets full enumeration working for
+multiple real devices (keyboard, mouse, CH340 USB-to-TTL) — with only a
+missing class-driver gap remaining, nothing electrical or protocol-
+level. This is direct proof the hardware path (VBUS, ID, D+/D−, PHY,
+HCD/core reset, enumeration protocol) is capable of working correctly
+on this exact board model.
+
+### Revised conclusion
+
+Since another unit of the same board model demonstrably works, our
+board's failure is now more likely explained by one of:
+1. **A defect specific to our individual board** (cold solder joint,
+   damaged trace/pad, ESD component failure on D+/D− between CN13 and
+   PA11/PA12) — consistent with all steps so far, and now *more*
+   likely given a sibling board works fine.
+2. A subtle difference in our own firmware/init sequence not present
+   in the working poster's setup (though Steps 1–23 found no config or
+   pinmux discrepancy vs. ST's own reference).
+
+This makes an external oscilloscope/protocol-analyzer capture at the
+physical D+/D− test points (or a straightforward continuity/resistance
+check across SB26/SB27 and the CN13 connector pins) even more valuable
+as the next step — it can now be interpreted with higher confidence
+that a negative (dead-bus) result means genuine local hardware failure,
+not a fleet-wide board/software limitation.
