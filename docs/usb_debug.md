@@ -1418,3 +1418,53 @@ check across SB26/SB27 and the CN13 connector pins) even more valuable
 as the next step — it can now be interpreted with higher confidence
 that a negative (dead-bus) result means genuine local hardware failure,
 not a fleet-wide board/software limitation.
+
+## Step 25: Compare against a working, publicly-shared H755ZI-Q USB project
+
+User pointed to
+`https://github.com/st9540808/NUCLEO-H755ZI-Q-USB-OTG-CDC` — a real,
+working CubeMX 6.6.1-generated project for the same board that gets a
+CDC virtual COM port enumerated on the PC through CN13 (USER USB).
+
+**Note:** this project runs `OTG_FS` in **Device** mode
+(`VirtualMode=Device_Only` in the `.ioc`), not Host mode, so it can't be
+used as a drop-in host-mode reference. But since Device and Host mode
+share the exact same physical pins/PHY/silicon block, its GPIO/clock
+config for those shared pins is still a useful independent check.
+
+Cloned (`--depth 1`) and inspected `CM7/USB_DEVICE/Target/usbd_conf.c`
+(`HAL_PCD_MspInit`) and the `.ioc` file:
+
+| Setting | Their project (working, Device mode) | Ours (Host mode) | Match? |
+|---|---|---|---|
+| PA8 (SOF) | AF10, `GPIO_MODE_AF_PP`, no pull | not configured (unused) | N/A — SOF not required for enumeration in either mode |
+| PA9 (VBUS sense) | plain `GPIO_MODE_INPUT`, no pull | plain `LL_GPIO_MODE_INPUT`, no pull | ✅ |
+| PA11 (D−) | AF10, `GPIO_MODE_AF_PP`, no pull, `GPIO_SPEED_FREQ_LOW` | AF10, alternate/push-pull, no pull, `SPEED_FREQ_VERY_HIGH` | Only the GPIO speed differs (LOW vs VERY_HIGH) |
+| PA12 (D+) | AF10, `GPIO_MODE_AF_PP`, no pull, `GPIO_SPEED_FREQ_LOW` | AF10, alternate/push-pull, no pull, `SPEED_FREQ_VERY_HIGH` | Same speed difference as PA11 |
+| USB kernel clock | `RCC_USBCLKSOURCE_HSI48`, 48 MHz | `LL_RCC_HSI48_Enable()`, same source | ✅ |
+| `HAL_PWREx_EnableUSBVoltageDetector()` | called | called (see `stm32_hcd_adapter.c` near line 145) | ✅ |
+| PD10 (VBUS enable) | plain GPIO output, label `USB_OTG_FS_PWR_EN` | plain GPIO output (Zephyr `gpio-hog`, active-low enable) | ✅ (same board-level signal) |
+| PG7 (overcurrent) | plain GPIO input, label `USB_OTG_FS_OVCR` | plain GPIO input, no pull | ✅ |
+
+**Only difference found: GPIO output speed on PA11/PA12** — CubeMX's
+Device-mode default uses `GPIO_SPEED_FREQ_LOW`, while our Host-mode
+code uses `SPEED_FREQ_VERY_HIGH`. This is very unlikely to be a root
+cause: higher slew-rate/speed settings are, if anything, more permissive
+for a full-speed (12 Mbit/s) signal, not less — `VERY_HIGH` should
+produce a cleaner/faster edge, not a broken one. Everything else
+(alternate function number, pull configuration, output type, VBUS
+pin handling, VBUS voltage detector enable, kernel clock source)
+matches exactly.
+
+### Conclusion
+
+This is now the **third independent confirmation** (Step 21 vendored
+H723ZG Host example, Step 23 raw datasheet AF-table audit, and now this
+real working H755ZI-Q Device-mode project) that our GPIO/pinmux/clock
+configuration for the shared USB pins is correct and matches known-good
+reference code. Combined with Step 24 (a different H755ZI-Q board
+successfully doing full Host-mode enumeration), the software/config
+side of this investigation is now about as exhausted as it can be
+without new instrumentation. The evidence continues to converge on a
+**board-specific physical-layer fault** (most likely on our unit's
+D+/D− path) as the most probable remaining explanation.
