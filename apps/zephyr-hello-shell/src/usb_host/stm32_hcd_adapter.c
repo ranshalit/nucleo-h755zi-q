@@ -347,15 +347,15 @@ USBH_StatusTypeDef USBH_LL_SubmitURB(USBH_HandleTypeDef *phost, uint8_t pipe,
 		       USBH_OK : USBH_FAIL;
 }
 
-static void adapter_dump_channel(uint8_t pipe)
+static void adapter_dump_channel(uint8_t pipe, HCD_URBStateTypeDef state)
 {
 	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
 	USB_OTG_HostChannelTypeDef *hc = USBx_HC(pipe);
 
-	printf("ST USBH: pipe %u stalled HC_state=%d HCINT=0x%08lx "
+	printf("ST USBH: pipe %u URB=%d HC_state=%d HCINT=0x%08lx "
 	       "HCINTMSK=0x%08lx HCTSIZ=0x%08lx HCCHAR=0x%08lx "
 	       "HPRT=0x%08lx PA9=%lu PG7_nFAULT=%lu\n",
-	       pipe, HAL_HCD_HC_GetState(&hcd_handle, pipe),
+	       pipe, state, HAL_HCD_HC_GetState(&hcd_handle, pipe),
 	       (unsigned long)hc->HCINT, (unsigned long)hc->HCINTMSK,
 	       (unsigned long)hc->HCTSIZ, (unsigned long)hc->HCCHAR,
 	       (unsigned long)stm32_hcd_adapter_port_status(),
@@ -369,8 +369,8 @@ USBH_URBStateTypeDef USBH_LL_GetURBState(USBH_HandleTypeDef *phost,
 	HCD_HandleTypeDef *hcd = phost->pData;
 	HCD_URBStateTypeDef state = HAL_HCD_HC_GetURBState(hcd, pipe);
 
-	if (state == URB_STALL) {
-		adapter_dump_channel(pipe);
+	if ((state == URB_ERROR) || (state == URB_STALL)) {
+		adapter_dump_channel(pipe, state);
 	}
 	return (USBH_URBStateTypeDef)state;
 }

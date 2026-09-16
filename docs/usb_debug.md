@@ -1062,7 +1062,60 @@ File download complete
 Start operation achieved successfully
 ```
 
-Per the user's instruction, no runtime validation was performed after this
-flash. Therefore this step establishes that the ST-Core A/B firmware is built
-and programmed, but it does **not yet establish** whether EP0 enumeration
-succeeds or still stalls.
+The first programming pass intentionally skipped runtime validation. A
+subsequent dedicated USB-only serial check allowed the long HCD initialization
+to settle, then queried `usbhost status` and `usbhost descriptor`.
+
+ST Core independently reproduces the original failure:
+
+```text
+ST USBH: USB Device Connected
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+ST USBH: pipe 0 URB=4 HC_state=2
+HCINT=0x00000000 HCINTMSK=0x000004ff
+HCTSIZ=0x60080008 HCCHAR=0x20100040
+HPRT=0x00021405 PA9=1 PG7_nFAULT=1
+ST USBH: unrecovered error
+ST USBH ERROR: Control error: Device not responding
+```
+
+Settled shell state:
+
+```text
+stack: ST stm32-mw-usb-host Core
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: wait_for_attachment
+enum_state: idle
+control_state: error
+connected: 1
+port_enabled: 1
+
+usbhost descriptor
+no valid device descriptor
+```
+
+`URB=4` is HAL `URB_STALL`. `HCTSIZ=0x60080008` again shows the first
+eight-byte SETUP packet with SETUP PID. `HCCHAR` identifies full-speed
+endpoint zero at address zero with MPS 64; bit 29 varies with channel enable
+state when sampled. The port remains connected and enabled, VBUS is present,
+the power switch reports no fault, and physical ID grounding is recognized.
+
+This result rules out the custom enumerator, its one-channel direction
+switching, and its control-state sequencing as the cause. Both the custom
+path and ST's complete middleware fail at the same first SETUP transaction.
+Do not spend further effort rewriting the enumeration protocol. The next
+diagnostic boundary is the physical USB data path:
+
+1. Inspect/measure continuity through MB1363 solder bridges SB26 (DM) and
+   SB27 (DP), including connector-to-MCU routing and absence of a D+/D− swap.
+2. Capture the bus with a USB full-speed protocol analyzer. Confirm whether
+   the host emits a valid reset and SETUP packet and whether the device
+   actually transmits STALL, or whether the STM32/HAL is interpreting a
+   malformed/noisy response as STALL.
+3. If no analyzer is available, use a USB-capable oscilloscope to check idle
+   J-state, reset SE0, packet activity, and signal integrity on both data
+   lines. A normal logic analyzer is not sufficient for reliable USB FS
+   protocol diagnosis.
