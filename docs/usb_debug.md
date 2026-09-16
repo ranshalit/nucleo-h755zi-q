@@ -1468,3 +1468,102 @@ side of this investigation is now about as exhausted as it can be
 without new instrumentation. The evidence continues to converge on a
 **board-specific physical-layer fault** (most likely on our unit's
 D+/D− path) as the most probable remaining explanation.
+
+## Step 26: BREAKTHROUGH — USER USB physical layer proven 100% alive via Device-mode test
+
+User's insight: since a PC (a known-good USB host) was now connected to
+CN13, we could flash a **stock, unmodified Zephyr USB Device sample**
+(`samples/subsys/usb/cdc_acm`) onto the exact same board/connector/PHY
+and let the PC itself act as the reference host — sidestepping every
+assumption baked into our custom Host-mode code entirely.
+
+### What was done
+
+1. Built `samples/subsys/usb/cdc_acm` (stock Zephyr sample, zero
+   modifications) for `nucleo_h755zi_q/stm32h755xx/m7` — this board's
+   Zephyr port already wires `zephyr_udc0` to `&usbotg_fs` on
+   PA11/PA12 (confirmed earlier in the board `.dts`), so no devicetree
+   changes were needed.
+2. Flashed it via the same `STM32_Programmer_CLI`/SWD path used
+   throughout this investigation.
+3. Connected the same CN13 (USER USB) connector directly to this
+   machine's own USB port (a real PC host) with a standard cable.
+
+### Result
+
+```
+$ lsusb
+Bus 003 Device 026: ID 2fe3:0001 NordicSemiconductor Zephyr CDC ACM sample
+```
+
+Full, clean enumeration: correct device descriptor (bDeviceClass 239/
+Miscellaneous, IAD), manufacturer/product/serial strings ("ZEPHYR",
+"Zephyr CDC ACM sample", a real serial number), CDC-ACM configuration
+descriptor parsed correctly, and Linux bound `cdc_acm` and created
+`/dev/ttyACM1`.
+
+**Bidirectional data-path test** (not just EP0 control transfers —
+exercises the bulk IN/OUT endpoints too):
+
+```python
+s = serial.Serial('/dev/ttyACM1', 115200, timeout=2)
+s.write(b'Hello USB!\r\n')
+# read back:
+b'Hello USB!\r\n'
+```
+
+The sample's echo behavior worked perfectly — full round-trip data
+through the exact same D+/D−, PHY, solder joints, and connector that,
+under our Host-mode firmware, showed constant SE0 with the GPIO capture
+tool (Step 22).
+
+### This conclusively overturns the Steps 20–23/25 "board hardware
+fault" hypothesis
+
+Everything this investigation attributed to a possible dead/damaged
+physical D+/D− path (cold solder joint, broken trace, damaged PHY, bad
+ESD component) is now disproven for **this specific board**: the exact
+same electrical path carries a fully valid USB Full-Speed signal,
+completes chirp/reset/enumeration, and sustains bulk data transfer, as
+long as the board is in **Device** mode.
+
+This means:
+- VBUS, ID pin, D+/D−, the OTG_FS PHY, the solder bridges, CN13 itself,
+  and all board-level wiring are **all electrically sound**.
+- The root cause of the original failure is now isolated with high
+  confidence to the **Host-mode (HCD) code path** — either in our
+  custom `stm32_hcd_adapter.c` glue, ST's HAL/LL HCD driver behavior on
+  this MCU/board combination, or some interaction between them (e.g.,
+  the SETUP-token transmission/formation itself, FIFO configuration, or
+  a register-level HCD misconfiguration that only manifests once a real
+  transaction is attempted) — **not** a hardware defect.
+- The Step 24 finding (another H755ZI-Q board successfully Host-mode
+  enumerating keyboard/mouse/CH340) is now fully consistent with this:
+  the hardware family is capable; something specific to our *firmware's
+  host-mode implementation* is not completing the transaction, even
+  though the wire is good.
+
+### Immediate implication for next steps
+
+This entirely redirects the investigation: external oscilloscope/
+protocol-analyzer work is no longer the top priority (hardware is
+proven good). Instead, the priority becomes:
+- Line-by-line audit of the HCD channel/FIFO setup path in
+  `stm32_hcd_adapter.c` and comparison against exactly how Zephyr's own
+  `usb_dc_stm32.c`/HAL PCD path configures the same OTG_FS core in
+  Device mode, since that path demonstrably works on this silicon.
+- Trying **Zephyr's own upstream USB Host support** (if/when available
+  for this SoC) instead of the hand-rolled `stm32_hcd_adapter.c` +
+  ST middleware bridge, since our custom glue code remains the one
+  unproven, never-independently-validated layer in this whole stack.
+- Revisiting HCD-specific register setup (`HCTSIZ`, `HCCHAR`, FIFO
+  RAM allocation, `GRXFSIZ`/`GNPTXFSIZ`/`HPTXFSIZ`) with fresh
+  suspicion, now that "the wire is broken" is off the table.
+
+### Board state note
+
+The board is currently flashed with this stock CDC-ACM **Device**-mode
+test firmware, not the project's normal Host-mode
+`apps/zephyr-hello-shell` image. Re-flash
+`scripts/flash_zephyr_hello_shell.sh` to restore the normal Host-mode
+application when resuming host-mode debugging.
