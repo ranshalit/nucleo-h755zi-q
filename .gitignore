@@ -2,3 +2,5 @@
 vendor/reference/stm32cubeh7/Projects/**/STM32CubeIDE/**/Debug/
 vendor/reference/stm32cubeh7/Projects/**/STM32CubeIDE/**/Release/
 vendor/reference/stm32cubeh7/Projects/**/STM32CubeIDE/**/.settings/language.settings.xml
+
+.worktrees/
