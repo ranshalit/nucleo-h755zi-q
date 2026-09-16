@@ -19,6 +19,16 @@ endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_hello_shell)
 
+if(DEFINED ENV{SOURCE_DATE_EPOCH} AND
+   NOT "$ENV{SOURCE_DATE_EPOCH}" MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "SOURCE_DATE_EPOCH must be a nonnegative integer")
+endif()
+
+string(TIMESTAMP APP_BUILD_TIMESTAMP "%Y-%m-%dT%H:%M:%SZ" UTC)
+target_compile_definitions(app PRIVATE
+  APP_BUILD_TIMESTAMP=\"${APP_BUILD_TIMESTAMP}\"
+)
+
 target_sources(app PRIVATE
   src/boot_optimizations.c
   src/main.c
