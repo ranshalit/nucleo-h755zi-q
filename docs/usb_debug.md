@@ -1289,3 +1289,55 @@ oscilloscope or USB protocol analyzer probing the physical D+/D− test
 points directly remains the authoritative next step to conclusively
 resolve whether the bus is truly electrically dead or whether this is a
 software-visibility limitation.
+
+## Step 23: Full pinmux/AF cross-check for all USB-related pins
+
+Requested review: re-derive every USB-host-related pin's alternate
+function assignment straight from the datasheet AF table
+(`docs/rm0477-pinmux-pad-extract.md`, Table 10, extracted from
+`stm32h743vi.pdf`) and compare it, pin-by-pin, against what
+`adapter_config_gpio()` in `stm32_hcd_adapter.c` actually programs.
+
+Pins involved (all on the CN13 USER USB / OTG_FS path per UM2408 and
+MB1363 D-01):
+
+| Pin  | Signal            | Datasheet AF (Table 10) | Firmware config | Match? |
+|------|-------------------|--------------------------|-----------------|--------|
+| PA8  | OTG_FS_SOF (unused)| AF10                    | not configured (SOF not used by this app) | N/A, not required for enumeration |
+| PA9  | OTG_FS VBUS sense | no AF — plain analog/digital input pin (H7 OTG_FS FS core has no dedicated VBUS-sense AF; VBUS is read as GPIO) | `MODE_INPUT`, `PULL_NO` | ✅ |
+| PA10 | OTG_FS_ID         | **AF10**                | `AF_10`, `MODE_ALTERNATE`, `PULL_UP`, open-drain | ✅ |
+| PA11 | OTG_FS_DM (D−)    | **AF10**                | `AF_10`, `MODE_ALTERNATE`, `PULL_NO`, push-pull, very-high speed | ✅ |
+| PA12 | OTG_FS_DP (D+)    | **AF10**                | `AF_10`, `MODE_ALTERNATE`, `PULL_NO`, push-pull, very-high speed | ✅ |
+| PD10 | VBUS enable (active-low, board-level MOSFET/load-switch enable) | n/a — plain GPIO output, no AF | Zephyr `gpio-hog` in board overlay, `output-high` = disabled by default, driven low by app to enable VBUS | ✅ |
+| PG7  | Overcurrent fault (nFAULT) | n/a — plain GPIO input, no AF | `MODE_INPUT`, `PULL_NO` | ✅ (note: no internal pull-up; relies on external pull-up per schematic, not verified but doesn't affect D+/D-) |
+
+Method: read the raw AF0–AF15 table rows for PA8–PA12 directly out of
+the extracted datasheet text, aligning each row's 16 tokens against the
+`AF0..AF15` header row to identify which column is OTG_FS-related for
+each pin (confirmed via PA8, whose AF10 slot is unambiguously
+`OTG_FS_SOF`, anchoring "AF10 = OTG_FS block" for this GPIO port/pin
+group). Cross-referenced against `LL_GPIO_SetAFPin_8_15(...,
+LL_GPIO_AF_10)` calls in the firmware for PA10/PA11/PA12.
+
+**Result: every pin's alternate-function number, mode, pull, and output
+type matches the datasheet exactly.** No mismatch, no swapped AF index,
+no missing alternate-function assignment was found. This corroborates
+the Step 21 finding (config diff against ST's own H723ZG reference
+example showed no discrepancy) from an independent angle (raw datasheet
+table instead of a reference project).
+
+### Conclusion
+
+The pinmux/AF configuration for all USB-host-related pins is
+byte-for-byte correct per the datasheet. This rules out a pinmux
+misconfiguration as the root cause. Combined with Steps 1–22 (VBUS
+present, ID pin correctly grounded/read, HPRT/HCD registers showing
+correct reset/enable sequencing, HCTSIZ showing correctly-sized 8-byte
+SETUP transfers, solder bridges populated, no missed HAL init step vs.
+ST's own reference, and now a clean pinmux audit), the remaining
+plausible root causes are narrowed almost entirely to the physical
+layer: a bad solder joint/trace/ESD-protection component on the D+/D−
+path between the connector and PA11/PA12, or a damaged internal
+transceiver — not anything discoverable by further code/config review.
+An external oscilloscope or protocol analyzer capture at the physical
+test points remains the next authoritative step.
