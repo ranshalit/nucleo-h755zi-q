@@ -1168,3 +1168,53 @@ Updated next step: since population is confirmed correct, prioritize
 continuity measurement (bridge-to-connector-to-MCU pin) over resoldering,
 and treat a USB protocol analyzer/scope capture as the next
 highest-value action if continuity measures good.
+
+## Step 21 — Checked for an official "as-is" CubeH7 example: none exists for this board
+
+To go one level stronger than the ST-Core-middleware A/B test (Step 19),
+we looked for an unmodified, official STM32CubeH7 USB Host *application*
+project for our exact board, to flash and test completely outside Zephyr
+and outside all of our own HAL bring-up code.
+
+Checked the full `STMicroelectronics/STM32CubeH7` GitHub repository:
+
+- `Projects/NUCLEO-H755ZI-Q` only contains a `readme.txt` referring to
+  `NUCLEO-H745ZI-Q` for compatible examples.
+- `Projects/NUCLEO-H745ZI-Q` has no `Applications/USB_Host` directory at
+  all — no USB Host example exists for it.
+- Repo-wide, `Applications/USB_Host/*` only exists for EVAL/Discovery
+  boards (`STM32H743I-EVAL`, `STM32H745I-DISCO`, `STM32H747I-DISCO`,
+  `STM32H747I-EVAL`, `STM32H750B-DK`) and the Nucleo-64 `NUCLEO-H723ZG`.
+  **No Nucleo-144 board (H743ZI/H745ZI-Q/H755ZI-Q) has an official USB
+  Host example.**
+
+This confirms USB Host mode on the Nucleo-144 USER USB connector is an
+unofficial/unsupported use case from ST's own test-coverage perspective —
+consistent with everything already found in this investigation (ID
+grounding jumper, active-low VBUS switch quirks, no CubeMX host template).
+
+As the closest available official reference, vendored (source only) ST's
+`NUCLEO-H723ZG/Applications/USB_Host/MSC_Standalone` into
+`third_party/cubeh7-reference/` for a line-by-line HAL/HCD configuration
+diff (see that folder's `README.md` for the full comparison table). H723ZG
+uses the combo `USB_OTG_HS` peripheral in FS-PHY mode (different silicon
+block than our board's dedicated `USB_OTG_FS`), so it cannot be flashed
+onto our board as a true "as-is" test — it was used purely as a
+configuration reference.
+
+**Result: no missed initialization step found.** Every comparable
+HCD/GPIO/clock setting (`dma_enable`, `phy_itface`, `low_power_enable`,
+`vbus_sensing_enable`, `speed`, D+/D− AF10 config, active-low VBUS switch
+polarity) matches between our code and ST's own reference. The one
+difference — our code configures PA9 as a no-pull input in MSP init while
+the reference doesn't touch its equivalent pin — is explained by the
+different peripheral (`USB_OTG_FS` vs `USB_OTG_HS`-in-FS-mode) and was
+already empirically confirmed necessary on our hardware (Step 7-era
+finding: `GINTSTS.CMOD` never flips to host mode without it).
+
+This closes out the firmware/HAL-configuration diagnostic avenue: custom
+code, ST's official middleware, and now ST's own official low-level
+reference all agree our configuration is correct. The physical D+/D−
+path (SB26/SB27 continuity, cable/connector, or a scope/protocol-analyzer
+capture) remains the only unexplored explanation for the persistent
+first-SETUP STALL/ERROR.
