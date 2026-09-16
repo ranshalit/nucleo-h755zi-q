@@ -1,3 +1,12 @@
 &eth_phy {
 	no-reset;
 };
+
+&gpiod {
+	usb_vbus_disable {
+		gpio-hog;
+		gpios = <10 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "USB VBUS disable (active-low enable)";
+	};
+};

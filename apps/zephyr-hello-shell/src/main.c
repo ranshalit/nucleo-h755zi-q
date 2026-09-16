@@ -11,6 +11,8 @@
 #include "board_io.h"
 #include "http_server.h"
 
+extern int board_usb_host_start(void);
+
 static int cmd_version(const struct shell *shell, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -159,6 +161,12 @@ int main(void)
 
 	printf("HTTP server listening on http://%s:%u/\n",
 	       CONFIG_NET_CONFIG_MY_IPV4_ADDR, board_http_server_port());
+
+	ret = board_usb_host_start();
+	if (ret != 0) {
+		printf("USB host startup failed: %d\n", ret);
+		/* Non-fatal: continue running LEDs/HTTP even if USB host init failed. */
+	}
 
 	return 0;
 }

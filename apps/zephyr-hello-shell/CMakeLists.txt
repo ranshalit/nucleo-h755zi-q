@@ -35,6 +35,13 @@ target_sources(app PRIVATE
   src/board_io.c
   src/http_server.c
   src/web_assets.c
+  src/usb_host/usb_enumerator.c
+  src/usb_host/stm32_hcd_adapter.c
+  src/usb_host/usb_host_shell.c
+)
+
+target_include_directories(app PRIVATE
+  src/usb_host
 )
 
 zephyr_linker_sources(SECTIONS sections-rom.ld)

@@ -32,6 +32,16 @@ static void board_early_uart_init(void)
 	}
 }
 
+static void board_early_usb_vbus_off(void)
+{
+	LL_GPIO_SetPinMode(GPIOD, LL_GPIO_PIN_10, LL_GPIO_MODE_OUTPUT);
+	LL_GPIO_SetPinOutputType(GPIOD, LL_GPIO_PIN_10, LL_GPIO_OUTPUT_PUSHPULL);
+	LL_GPIO_SetPinSpeed(GPIOD, LL_GPIO_PIN_10, LL_GPIO_SPEED_FREQ_LOW);
+	LL_GPIO_SetPinPull(GPIOD, LL_GPIO_PIN_10, LL_GPIO_PULL_NO);
+	/* MB1363 U18 (STMPS2141STR): PD10 low enables VBUS, high disables it. */
+	LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_10);
+}
+
 static void board_early_uart_putc(char c)
 {
 	while (!LL_USART_IsActiveFlag_TXE_TXFNF(USART3)) {
@@ -65,12 +75,14 @@ static void board_emit_boot_banner(void)
 void soc_prep_hook(void)
 {
 	board_early_uart_init();
+	board_early_usb_vbus_off();
 	board_emit_boot_banner();
 }
 #else
 static int board_early_boot_banner(void)
 {
 	board_early_uart_init();
+	board_early_usb_vbus_off();
 	board_emit_boot_banner();
 
 	return 0;

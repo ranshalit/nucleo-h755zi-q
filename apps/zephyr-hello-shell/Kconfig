@@ -1,0 +1,12 @@
+source "Kconfig.zephyr"
+
+config APP_USB_HOST_HCD
+	bool "Enable STM32 USB host controller (HCD) support"
+	default n
+	select USE_STM32_HAL_HCD
+	select USE_STM32_LL_USB
+	select USE_STM32_HAL_PWR_EX
+	help
+	  Enables the STM32Cube HAL Host Controller Driver (HCD) module,
+	  used by this application's usb_host adapter to drive OTG_FS in
+	  host mode for USB device enumeration.
