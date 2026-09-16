@@ -1006,3 +1006,63 @@ Enumeration nevertheless produced the same three endpoint-zero SETUP
 cause of the current failure. The jumper may be removed; further diagnosis
 should focus on the transmitted SETUP packet/signal path using a USB protocol
 analyzer or comparison with ST's complete USB Host middleware.
+
+## Step 19 — Replace the custom runtime enumerator with ST USB Host Core
+
+To distinguish a bug in the custom control state machine from a lower-level
+board/HCD problem, the firmware runtime now uses ST's complete generic USB
+Host Core from
+[`STMicroelectronics/stm32-mw-usb-host`](https://github.com/STMicroelectronics/stm32-mw-usb-host)
+at commit `a5cc3798cd50f6b86322e7091ccf7e3eadd5be47`.
+
+Imported components:
+
+- `Core/Src/usbh_core.c`
+- `Core/Src/usbh_ctlreq.c`
+- `Core/Src/usbh_ioreq.c`
+- `Core/Src/usbh_pipes.c`
+- the corresponding `Core/Inc` headers and upstream license
+
+No USB class implementation was imported. In particular, this is not yet a
+UVC camera driver and cannot stream video. This A/B image exercises ST's
+official attachment, reset, descriptor, address, and configuration state
+machines only.
+
+The project-specific `USBH_LL_*` bridge retains the board behavior already
+proven in Steps 15-18:
+
+- PA9 VBUS input and PA10/PA11/PA12 AF10 pin configuration;
+- HSI48 and the USB33 analog supply;
+- split `USB_CoreInit()` / forced-host / `USB_HostInit()` initialization;
+- OTG_FS IRQ 101 and HAL HCD callbacks;
+- active-low PD10 VBUS switching and existing-attachment recovery;
+- PA10/CIDSTS, HPRT, PA9, PG7, and host-channel diagnostics.
+
+The important protocol difference is that ST Core allocates separate EP0 OUT
+and IN pipes instead of reconfiguring one channel for every control stage.
+`USBH_Process()` runs from a 1 ms Zephyr thread with `USBH_USE_OS=0`.
+`usbhost status` now reports the ST global, enumeration, and control states;
+`usbhost descriptor` reads ST's parsed device descriptor.
+
+The previous custom enumerator is no longer linked into firmware, so it
+cannot contend for the HCD. Its host-native regression suite remains in the
+repository and still passes all 11 tests.
+
+Build and programming result:
+
+```text
+scripts/run_usb_enumerator_tests.sh
+ALL TESTS PASSED
+
+scripts/flash_zephyr_hello_shell.sh --build-only
+exit 0
+
+scripts/flash_zephyr_hello_shell.sh --skip-validate
+File download complete
+Start operation achieved successfully
+```
+
+Per the user's instruction, no runtime validation was performed after this
+flash. Therefore this step establishes that the ST-Core A/B firmware is built
+and programmed, but it does **not yet establish** whether EP0 enumeration
+succeeds or still stalls.

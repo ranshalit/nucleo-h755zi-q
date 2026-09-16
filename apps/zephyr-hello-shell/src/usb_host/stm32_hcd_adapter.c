@@ -7,7 +7,6 @@
 
 #include <zephyr/irq.h>
 #include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
 
 #include <stm32h7xx_hal.h>
 #include <stm32h7xx_hal_hcd.h>
@@ -17,204 +16,46 @@
 #include <stm32h7xx_ll_rcc.h>
 #include <stm32h7xx_ll_usb.h>
 
-LOG_MODULE_REGISTER(stm32_hcd_adapter, LOG_LEVEL_INF);
+#include "usbh_core.h"
 
 #define STM32_HCD_IRQ 101 /* OTG_FS_IRQn, RM0468 Table 135 */
 #define STM32_HCD_IRQ_PRI 5
-#define STM32_HCD_CHANNEL_CONTROL 0
-#define STM32_HCD_CONTROL_MPS 64U
-
-/* Event bits set from HAL callbacks (ISR context), drained by stm32_hcd_adapter_poll(). */
-#define EVT_CONNECT    BIT(0)
-#define EVT_DISCONNECT BIT(1)
-#define EVT_OVERCURRENT BIT(2)
 
 static HCD_HandleTypeDef hcd_handle;
-static struct usb_enumerator enumerator;
-static atomic_t pending_events;
-static uint16_t control_mps = STM32_HCD_CONTROL_MPS;
-
-static void adapter_dump_channel(const char *stage, HCD_HandleTypeDef *hcd)
-{
-	uint32_t USBx_BASE = (uint32_t)hcd->Instance;
-	USB_OTG_HostChannelTypeDef *hc = USBx_HC(STM32_HCD_CHANNEL_CONTROL);
-
-	printf("usbhost: %s failed HC_state=%d URB=%d HCINT=0x%08lx "
-	       "HCINTMSK=0x%08lx HCTSIZ=0x%08lx HCCHAR=0x%08lx HPRT=0x%08lx "
-	       "PA9=%lu PG7_nFAULT=%lu\n",
-	       stage,
-	       HAL_HCD_HC_GetState(hcd, STM32_HCD_CHANNEL_CONTROL),
-	       HAL_HCD_HC_GetURBState(hcd, STM32_HCD_CHANNEL_CONTROL),
-	       (unsigned long)hc->HCINT,
-	       (unsigned long)hc->HCINTMSK,
-	       (unsigned long)hc->HCTSIZ,
-	       (unsigned long)hc->HCCHAR,
-	       (unsigned long)USBx_HPRT0,
-	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9),
-	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOG, LL_GPIO_PIN_7));
-}
-
-static int adapter_submit_stage(HCD_HandleTypeDef *hcd, uint8_t direction,
-				uint8_t token, uint8_t *buf, uint16_t length,
-				int64_t deadline, const char *stage)
-{
-	while (k_uptime_get() <= deadline) {
-		if (HAL_HCD_HC_SubmitRequest(hcd, STM32_HCD_CHANNEL_CONTROL,
-					     direction, EP_TYPE_CTRL, token,
-					     buf, length, 0) != HAL_OK) {
-			return -EPROTO;
-		}
-
-		while (k_uptime_get() <= deadline) {
-			HCD_URBStateTypeDef urb =
-				HAL_HCD_HC_GetURBState(hcd, STM32_HCD_CHANNEL_CONTROL);
-
-			if (urb == URB_DONE) {
-				return 0;
-			}
-			if (urb == URB_STALL) {
-				adapter_dump_channel(stage, hcd);
-				return -EPIPE;
-			}
-			if (urb == URB_ERROR) {
-				adapter_dump_channel(stage, hcd);
-				return -EPROTO;
-			}
-			if ((urb == URB_NOTREADY) || (urb == URB_NYET)) {
-				break;
-			}
-			k_msleep(1);
-		}
-	}
-
-	adapter_dump_channel(stage, hcd);
-	return -ETIMEDOUT;
-}
-
-static int adapter_reset_port(void *ctx)
-{
-	HCD_HandleTypeDef *hcd = ctx;
-
-	/* Match STM32 USB Host middleware attachment/reset settling times. */
-	k_msleep(100);
-	if (HAL_HCD_ResetPort(hcd) != HAL_OK) {
-		return -1;
-	}
-	k_msleep(100);
-	return 0;
-}
-
-static int adapter_get_speed(void *ctx)
-{
-	HCD_HandleTypeDef *hcd = ctx;
-
-	return (int)HAL_HCD_GetCurrentSpeed(hcd);
-}
-
-static int adapter_control_read(void *ctx, uint8_t address, uint8_t bmRequestType,
-				 uint8_t bRequest, uint16_t wValue, uint16_t wIndex,
-				 uint8_t *buf, uint16_t length, int32_t timeout_ms)
-{
-	HCD_HandleTypeDef *hcd = ctx;
-	uint8_t setup_pkt[8];
-	int64_t deadline;
-	int ret;
-
-	setup_pkt[0] = bmRequestType;
-	setup_pkt[1] = bRequest;
-	setup_pkt[2] = (uint8_t)(wValue & 0xFF);
-	setup_pkt[3] = (uint8_t)(wValue >> 8);
-	setup_pkt[4] = (uint8_t)(wIndex & 0xFF);
-	setup_pkt[5] = (uint8_t)(wIndex >> 8);
-	setup_pkt[6] = (uint8_t)(length & 0xFF);
-	setup_pkt[7] = (uint8_t)(length >> 8);
-
-	(void)HAL_HCD_HC_Init(hcd, STM32_HCD_CHANNEL_CONTROL, 0, address,
-			      HCD_DEVICE_SPEED_FULL, EP_TYPE_CTRL, control_mps);
-
-	deadline = k_uptime_get() + timeout_ms;
-	ret = adapter_submit_stage(hcd, 0, 0, setup_pkt, sizeof(setup_pkt),
-				   deadline, "setup");
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = adapter_submit_stage(hcd, 1, 1, buf, length, deadline, "data-in");
-	if (ret != 0) {
-		return ret;
-	}
-
-	uint16_t received = (uint16_t)HAL_HCD_HC_GetXferCount(
-		hcd, STM32_HCD_CHANNEL_CONTROL);
-
-	ret = adapter_submit_stage(hcd, 0, 1, NULL, 0, deadline, "status-out");
-	if (ret != 0) {
-		return ret;
-	}
-
-	if ((address == 0U) && (bRequest == 0x06U) &&
-	    ((wValue >> 8) == 0x01U) && (received >= 8U)) {
-		switch (buf[7]) {
-		case 8:
-		case 16:
-		case 32:
-		case 64:
-			control_mps = buf[7];
-			break;
-		default:
-			control_mps = 8U;
-			break;
-		}
-	}
-
-	return received;
-}
-
-static int adapter_set_address(void *ctx, uint8_t address, int32_t timeout_ms)
-{
-	HCD_HandleTypeDef *hcd = ctx;
-	uint8_t setup_pkt[8] = {
-		0x00, 0x05, address, 0x00, 0x00, 0x00, 0x00, 0x00,
-	};
-	int64_t deadline;
-	int ret;
-
-	(void)HAL_HCD_HC_Init(hcd, STM32_HCD_CHANNEL_CONTROL, 0, 0,
-			      HCD_DEVICE_SPEED_FULL, EP_TYPE_CTRL,
-			      control_mps);
-
-	deadline = k_uptime_get() + timeout_ms;
-	ret = adapter_submit_stage(hcd, 0, 0, setup_pkt, sizeof(setup_pkt),
-				   deadline, "set-address-setup");
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = adapter_submit_stage(hcd, 1, 1, NULL, 0, deadline,
-				   "set-address-status-in");
-	if (ret == 0) {
-		k_msleep(2);
-	}
-	return ret;
-}
-
-static const struct usb_hcd_ops stm32_ops = {
-	.reset_port = adapter_reset_port,
-	.get_speed = adapter_get_speed,
-	.control_read = adapter_control_read,
-	.set_address = adapter_set_address,
-};
 
 void HAL_HCD_Connect_Callback(HCD_HandleTypeDef *hhcd)
 {
-	ARG_UNUSED(hhcd);
-	atomic_or(&pending_events, EVT_CONNECT);
+	if (hhcd->pData != NULL) {
+		(void)USBH_LL_Connect(hhcd->pData);
+	}
 }
 
 void HAL_HCD_Disconnect_Callback(HCD_HandleTypeDef *hhcd)
 {
-	ARG_UNUSED(hhcd);
-	atomic_or(&pending_events, EVT_DISCONNECT);
+	if (hhcd->pData != NULL) {
+		(void)USBH_LL_Disconnect(hhcd->pData);
+	}
+}
+
+void HAL_HCD_PortEnabled_Callback(HCD_HandleTypeDef *hhcd)
+{
+	if (hhcd->pData != NULL) {
+		USBH_LL_PortEnabled(hhcd->pData);
+	}
+}
+
+void HAL_HCD_PortDisabled_Callback(HCD_HandleTypeDef *hhcd)
+{
+	if (hhcd->pData != NULL) {
+		USBH_LL_PortDisabled(hhcd->pData);
+	}
+}
+
+void HAL_HCD_SOF_Callback(HCD_HandleTypeDef *hhcd)
+{
+	if (hhcd->pData != NULL) {
+		USBH_LL_IncTimer(hhcd->pData);
+	}
 }
 
 static void stm32_hcd_isr(const void *arg)
@@ -226,11 +67,9 @@ static void stm32_hcd_isr(const void *arg)
 /*
  * Configure PA9 as a no-pull input for VBUS diagnostics, plus PA10
  * (OTG_FS_ID), PA11 (OTG_FS_DM) and PA12 (OTG_FS_DP) for AF10 (OTG_FS),
- * matching the pinout in
- * docs/rm0477-pinmux-pad-extract.md and docs/um2407-...md Table 16 (CN13
- * "USER USB" connector). Without this, PA10-PA12 stay as plain GPIOs and
- * D+/D- are never connected to the OTG_FS PHY. ID currently reads high,
- * but that is not yet established as the cause of the forced-mode failure.
+ * matching UM2408 and the MB1363 D-01 schematic for CN13 USER USB.
+ * Without this, PA10-PA12 stay as plain GPIOs and D+/D- are not connected
+ * to the OTG_FS peripheral.
  */
 static void adapter_config_gpio(void)
 {
@@ -263,11 +102,8 @@ static void adapter_config_gpio(void)
 	LL_GPIO_SetPinPull(GPIOG, LL_GPIO_PIN_7, LL_GPIO_PULL_NO);
 }
 
-int stm32_hcd_adapter_init(void)
+static int adapter_init_hardware(void)
 {
-	usb_enumerator_init(&enumerator, &stm32_ops, &hcd_handle);
-	control_mps = STM32_HCD_CONTROL_MPS;
-
 	printf("usbhost: init start\n");
 	adapter_config_gpio();
 	printf("usbhost: gpio configured\n");
@@ -320,7 +156,7 @@ int stm32_hcd_adapter_init(void)
 	hcd_handle.Init.speed = HCD_SPEED_FULL;
 	hcd_handle.Init.dma_enable = DISABLE;
 	hcd_handle.Init.phy_itface = HCD_PHY_EMBEDDED;
-	hcd_handle.Init.Sof_enable = DISABLE;
+	hcd_handle.Init.Sof_enable = ENABLE;
 	hcd_handle.Init.low_power_enable = DISABLE;
 	hcd_handle.Init.vbus_sensing_enable = DISABLE;
 	hcd_handle.Init.use_external_vbus = DISABLE;
@@ -387,30 +223,13 @@ int stm32_hcd_adapter_init(void)
 	IRQ_CONNECT(STM32_HCD_IRQ, STM32_HCD_IRQ_PRI, stm32_hcd_isr, NULL, 0);
 	irq_enable(STM32_HCD_IRQ);
 
-	hal_ret = HAL_HCD_Start(&hcd_handle);
-	if (hal_ret != HAL_OK) {
-		printf("usbhost: HAL_HCD_Start failed, status=%d\n", hal_ret);
-		return -EIO;
-	}
-
-	/* MB1363B U18 VBUS switch enable is active-low. */
-	LL_GPIO_ResetOutputPin(GPIOD, LL_GPIO_PIN_10);
-	k_msleep(100);
 	uint32_t hprt = *(__IO uint32_t *)((uintptr_t)hcd_handle.Instance +
 					  USB_OTG_HOST_PORT_BASE);
-	if ((hprt & USB_OTG_HPRT_PCSTS) != 0U) {
-		atomic_or(&pending_events, EVT_CONNECT);
-	}
-	printf("usbhost: ready HPRT=0x%08lx GINTSTS=0x%08lx GINTMSK=0x%08lx\n",
+	printf("usbhost: hardware ready HPRT=0x%08lx GINTSTS=0x%08lx GINTMSK=0x%08lx\n",
 	       (unsigned long)hprt,
 	       (unsigned long)hcd_handle.Instance->GINTSTS,
 	       (unsigned long)hcd_handle.Instance->GINTMSK);
 	return 0;
-}
-
-struct usb_enumerator *stm32_hcd_adapter_enumerator(void)
-{
-	return &enumerator;
 }
 
 int stm32_hcd_adapter_id_pin_level(void)
@@ -423,25 +242,184 @@ int stm32_hcd_adapter_id_status(void)
 	return (hcd_handle.Instance->GOTGCTL & USB_OTG_GOTGCTL_CIDSTS) ? 1 : 0;
 }
 
-void stm32_hcd_adapter_poll(void)
+uint32_t stm32_hcd_adapter_port_status(void)
 {
-	atomic_val_t events = atomic_clear(&pending_events);
+	return *(__IO uint32_t *)((uintptr_t)hcd_handle.Instance +
+				 USB_OTG_HOST_PORT_BASE);
+}
 
-	if (events & EVT_DISCONNECT) {
-		usb_enumerator_on_detach(&enumerator);
-		LOG_INF("usbhost: detached");
+USBH_StatusTypeDef USBH_LL_Init(USBH_HandleTypeDef *phost)
+{
+	int ret = adapter_init_hardware();
+
+	if (ret != 0) {
+		return USBH_FAIL;
 	}
-	if (events & EVT_CONNECT) {
-		usb_enumerator_on_attach(&enumerator);
-		LOG_INF("usbhost: attached, enumerating");
-		if (usb_enumerator_run(&enumerator) == 0) {
-			LOG_INF("usbhost: described vid=0x%04x pid=0x%04x class=0x%02x",
-				enumerator.descriptor.vendor_id,
-				enumerator.descriptor.product_id,
-				enumerator.descriptor.device_class);
-		} else {
-			LOG_WRN("usbhost: enumeration failed (%s)",
-				usb_enum_error_name(enumerator.error));
+
+	hcd_handle.pData = phost;
+	phost->pData = &hcd_handle;
+	return USBH_OK;
+}
+
+USBH_StatusTypeDef USBH_LL_DeInit(USBH_HandleTypeDef *phost)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_DeInit(hcd) == HAL_OK ? USBH_OK : USBH_FAIL;
+}
+
+USBH_StatusTypeDef USBH_LL_Start(USBH_HandleTypeDef *phost)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_Start(hcd) == HAL_OK ? USBH_OK : USBH_FAIL;
+}
+
+USBH_StatusTypeDef USBH_LL_Stop(USBH_HandleTypeDef *phost)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_Stop(hcd) == HAL_OK ? USBH_OK : USBH_FAIL;
+}
+
+USBH_SpeedTypeDef USBH_LL_GetSpeed(USBH_HandleTypeDef *phost)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	switch (HAL_HCD_GetCurrentSpeed(hcd)) {
+	case HCD_DEVICE_SPEED_HIGH:
+		return USBH_SPEED_HIGH;
+	case HCD_DEVICE_SPEED_LOW:
+		return USBH_SPEED_LOW;
+	default:
+		return USBH_SPEED_FULL;
+	}
+}
+
+USBH_StatusTypeDef USBH_LL_ResetPort(USBH_HandleTypeDef *phost)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_ResetPort(hcd) == HAL_OK ? USBH_OK : USBH_FAIL;
+}
+
+uint32_t USBH_LL_GetLastXferSize(USBH_HandleTypeDef *phost, uint8_t pipe)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_HC_GetXferCount(hcd, pipe);
+}
+
+USBH_StatusTypeDef USBH_LL_OpenPipe(USBH_HandleTypeDef *phost, uint8_t pipe,
+				    uint8_t epnum, uint8_t dev_address,
+				    uint8_t speed, uint8_t ep_type,
+				    uint16_t mps)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_HC_Init(hcd, pipe, epnum, dev_address, speed, ep_type, mps) ==
+		       HAL_OK ? USBH_OK : USBH_FAIL;
+}
+
+USBH_StatusTypeDef USBH_LL_ClosePipe(USBH_HandleTypeDef *phost, uint8_t pipe)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_HC_Halt(hcd, pipe) == HAL_OK ? USBH_OK : USBH_FAIL;
+}
+
+USBH_StatusTypeDef USBH_LL_ActivatePipe(USBH_HandleTypeDef *phost, uint8_t pipe)
+{
+	ARG_UNUSED(phost);
+	ARG_UNUSED(pipe);
+	return USBH_OK;
+}
+
+USBH_StatusTypeDef USBH_LL_SubmitURB(USBH_HandleTypeDef *phost, uint8_t pipe,
+				     uint8_t direction, uint8_t ep_type,
+				     uint8_t token, uint8_t *buffer,
+				     uint16_t length, uint8_t do_ping)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return HAL_HCD_HC_SubmitRequest(hcd, pipe, direction, ep_type, token,
+					buffer, length, do_ping) == HAL_OK ?
+		       USBH_OK : USBH_FAIL;
+}
+
+static void adapter_dump_channel(uint8_t pipe)
+{
+	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
+	USB_OTG_HostChannelTypeDef *hc = USBx_HC(pipe);
+
+	printf("ST USBH: pipe %u stalled HC_state=%d HCINT=0x%08lx "
+	       "HCINTMSK=0x%08lx HCTSIZ=0x%08lx HCCHAR=0x%08lx "
+	       "HPRT=0x%08lx PA9=%lu PG7_nFAULT=%lu\n",
+	       pipe, HAL_HCD_HC_GetState(&hcd_handle, pipe),
+	       (unsigned long)hc->HCINT, (unsigned long)hc->HCINTMSK,
+	       (unsigned long)hc->HCTSIZ, (unsigned long)hc->HCCHAR,
+	       (unsigned long)stm32_hcd_adapter_port_status(),
+	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9),
+	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOG, LL_GPIO_PIN_7));
+}
+
+USBH_URBStateTypeDef USBH_LL_GetURBState(USBH_HandleTypeDef *phost,
+					 uint8_t pipe)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+	HCD_URBStateTypeDef state = HAL_HCD_HC_GetURBState(hcd, pipe);
+
+	if (state == URB_STALL) {
+		adapter_dump_channel(pipe);
+	}
+	return (USBH_URBStateTypeDef)state;
+}
+
+USBH_StatusTypeDef USBH_LL_DriverVBUS(USBH_HandleTypeDef *phost,
+				      uint8_t state)
+{
+	ARG_UNUSED(phost);
+
+	if (state != 0U) {
+		LL_GPIO_ResetOutputPin(GPIOD, LL_GPIO_PIN_10);
+		k_msleep(100);
+		if ((stm32_hcd_adapter_port_status() & USB_OTG_HPRT_PCSTS) != 0U) {
+			(void)USBH_LL_Connect(hcd_handle.pData);
 		}
+	} else {
+		LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_10);
 	}
+
+	printf("usbhost: VBUS %s PD10=%lu PA9=%lu HPRT=0x%08lx\n",
+	       state != 0U ? "on" : "off",
+	       (unsigned long)LL_GPIO_IsOutputPinSet(GPIOD, LL_GPIO_PIN_10),
+	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9),
+	       (unsigned long)stm32_hcd_adapter_port_status());
+	return USBH_OK;
+}
+
+USBH_StatusTypeDef USBH_LL_SetToggle(USBH_HandleTypeDef *phost, uint8_t pipe,
+				     uint8_t toggle)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	if (hcd->hc[pipe].ep_is_in != 0U) {
+		hcd->hc[pipe].toggle_in = toggle;
+	} else {
+		hcd->hc[pipe].toggle_out = toggle;
+	}
+	return USBH_OK;
+}
+
+uint8_t USBH_LL_GetToggle(USBH_HandleTypeDef *phost, uint8_t pipe)
+{
+	HCD_HandleTypeDef *hcd = phost->pData;
+
+	return hcd->hc[pipe].ep_is_in != 0U ?
+		       hcd->hc[pipe].toggle_in : hcd->hc[pipe].toggle_out;
+}
+
+void USBH_Delay(uint32_t delay)
+{
+	k_msleep(delay);
 }

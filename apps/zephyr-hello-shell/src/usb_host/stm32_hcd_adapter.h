@@ -2,17 +2,15 @@
 #ifndef STM32_HCD_ADAPTER_H_
 #define STM32_HCD_ADAPTER_H_
 
-#include "usb_enumerator.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int stm32_hcd_adapter_init(void);
-struct usb_enumerator *stm32_hcd_adapter_enumerator(void);
-void stm32_hcd_adapter_poll(void);
 int stm32_hcd_adapter_id_pin_level(void);
 int stm32_hcd_adapter_id_status(void);
+uint32_t stm32_hcd_adapter_port_status(void);
 
 #ifdef __cplusplus
 }

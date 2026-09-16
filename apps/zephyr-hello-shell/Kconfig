@@ -8,5 +8,5 @@ config APP_USB_HOST_HCD
 	select USE_STM32_HAL_PWR_EX
 	help
 	  Enables the STM32Cube HAL Host Controller Driver (HCD) module,
-	  used by this application's usb_host adapter to drive OTG_FS in
-	  host mode for USB device enumeration.
+	  used by the STM32 USB Host Core bridge to drive OTG_FS in host
+	  mode for USB device enumeration.
