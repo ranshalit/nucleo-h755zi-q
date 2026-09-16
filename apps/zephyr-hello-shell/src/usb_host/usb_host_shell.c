@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "stm32_hcd_adapter.h"
+#include "usb_gpio_capture.h"
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
@@ -183,10 +185,102 @@ static int cmd_usbhost_descriptor(const struct shell *shell, size_t argc,
 	return 0;
 }
 
+static void print_capture_result(const struct shell *shell)
+{
+	extern uint32_t SystemCoreClock;
+	const uint32_t *buf;
+	uint32_t count;
+	uint32_t cycles;
+	uint32_t prev_dp, prev_dm;
+	uint32_t transitions = 0;
+
+	usb_gpio_capture_get(&buf, &count, &cycles);
+
+	if (count == 0U) {
+		shell_error(shell, "no samples captured");
+		return;
+	}
+
+	shell_print(shell, "samples: %u, cycles: %u, core_clock_hz: %u",
+		    count, cycles, SystemCoreClock);
+	if (SystemCoreClock != 0U) {
+		shell_print(shell, "avg_ns_per_sample: %u",
+			    (uint32_t)(((uint64_t)cycles * 1000000000ULL) /
+				       ((uint64_t)count * SystemCoreClock)));
+	}
+
+	/* D-=bit11, D+=bit12. Print only J/K/SE0 transitions to keep the
+	 * dump compact; a long run with zero transitions means no
+	 * electrical activity was seen on D+/D- during the window.
+	 */
+	prev_dp = (buf[0] >> 12) & 1U;
+	prev_dm = (buf[0] >> 11) & 1U;
+	shell_print(shell, "idx=0 DP=%u DM=%u (initial)", prev_dp, prev_dm);
+	for (uint32_t i = 1; i < count; i++) {
+		uint32_t dp = (buf[i] >> 12) & 1U;
+		uint32_t dm = (buf[i] >> 11) & 1U;
+
+		if (dp != prev_dp || dm != prev_dm) {
+			shell_print(shell, "idx=%u DP=%u DM=%u", i, dp, dm);
+			prev_dp = dp;
+			prev_dm = dm;
+			transitions++;
+		}
+	}
+	shell_print(shell, "total_transitions: %u", transitions);
+}
+
+static int cmd_usbhost_capture(const struct shell *shell, size_t argc,
+				char **argv)
+{
+	uint32_t num_samples = USB_GPIO_CAPTURE_MAX_SAMPLES;
+
+	if (argc > 1) {
+		num_samples = (uint32_t)atoi(argv[1]);
+	}
+
+	usb_gpio_capture_run(num_samples);
+	print_capture_result(shell);
+	return 0;
+}
+
+static int cmd_usbhost_arm(const struct shell *shell, size_t argc, char **argv)
+{
+	int timeout_ms = 3000;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(shell,
+		    "armed: capture will trigger on next SETUP submission "
+		    "(timeout %d ms)", timeout_ms);
+	usb_gpio_capture_arm();
+
+	while (usb_gpio_capture_armed() && timeout_ms > 0) {
+		k_sleep(K_MSEC(10));
+		timeout_ms -= 10;
+	}
+
+	if (usb_gpio_capture_armed()) {
+		usb_gpio_capture_disarm();
+		shell_error(shell, "timed out waiting for a SETUP submission");
+		return -ETIMEDOUT;
+	}
+
+	print_capture_result(shell);
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(status, NULL, "Show ST USB host state", cmd_usbhost_status),
 	SHELL_CMD(descriptor, NULL, "Show enumerated device descriptor",
 		  cmd_usbhost_descriptor),
+	SHELL_CMD(capture, NULL,
+		  "Tight-loop capture of D+/D- GPIO state (usbhost capture [n])",
+		  cmd_usbhost_capture),
+	SHELL_CMD(arm, NULL,
+		  "Arm a capture synchronized to the next SETUP submission",
+		  cmd_usbhost_arm),
 	SHELL_SUBCMD_SET_END
 );
 

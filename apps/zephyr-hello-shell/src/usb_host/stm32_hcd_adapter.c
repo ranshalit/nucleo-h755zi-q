@@ -17,6 +17,8 @@
 #include <stm32h7xx_ll_usb.h>
 
 #include "usbh_core.h"
+#include "usbh_ioreq.h"
+#include "usb_gpio_capture.h"
 
 #define STM32_HCD_IRQ 101 /* OTG_FS_IRQn, RM0468 Table 135 */
 #define STM32_HCD_IRQ_PRI 5
@@ -341,6 +343,22 @@ USBH_StatusTypeDef USBH_LL_SubmitURB(USBH_HandleTypeDef *phost, uint8_t pipe,
 				     uint16_t length, uint8_t do_ping)
 {
 	HCD_HandleTypeDef *hcd = phost->pData;
+	HAL_StatusTypeDef status;
+
+	if (token == USBH_PID_SETUP && usb_gpio_capture_armed()) {
+		/*
+		 * Start the tight-loop D+/D- capture immediately before the
+		 * hardware is told to transmit the SETUP token, so the
+		 * capture window is synchronized with the actual electrical
+		 * transaction instead of an arbitrary later snapshot.
+		 */
+		status = HAL_HCD_HC_SubmitRequest(hcd, pipe, direction, ep_type,
+						   token, buffer, length,
+						   do_ping);
+		usb_gpio_capture_run(USB_GPIO_CAPTURE_MAX_SAMPLES);
+		usb_gpio_capture_disarm();
+		return status == HAL_OK ? USBH_OK : USBH_FAIL;
+	}
 
 	return HAL_HCD_HC_SubmitRequest(hcd, pipe, direction, ep_type, token,
 					buffer, length, do_ping) == HAL_OK ?

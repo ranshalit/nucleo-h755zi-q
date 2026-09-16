@@ -1218,3 +1218,74 @@ reference all agree our configuration is correct. The physical D+/D−
 path (SB26/SB27 continuity, cable/connector, or a scope/protocol-analyzer
 capture) remains the only unexplored explanation for the persistent
 first-SETUP STALL/ERROR.
+
+## Step 22 — Software GPIO-based D+/D- capture (poor-man's logic analyzer)
+
+Before requiring external scope/protocol-analyzer hardware, we tried
+answering "can this be captured in software" using only the MCU itself.
+
+Implemented `apps/zephyr-hello-shell/src/usb_host/usb_gpio_capture.c/.h`:
+a tight loop that samples `GPIOA->IDR` (bits 11/12 = D-/D+) as fast as
+the CPU can execute, with interrupts disabled for determinism and a DWT
+cycle-counter timestamp. New shell commands:
+
+- `usbhost capture [n]` — free-running snapshot capture (not
+  synchronized to any transaction).
+- `usbhost arm` — arms a **synchronized** one-shot capture that fires
+  from inside `USBH_LL_SubmitURB()` (`stm32_hcd_adapter.c`) the instant a
+  SETUP-token URB is submitted to the hardware, so the sample window
+  starts right as the real electrical transaction is triggered instead of
+  at an arbitrary later moment.
+
+No DMA/timer peripherals are touched, so this cannot interfere with the
+already-working HCD configuration — purely a CPU busy-loop instrumentation
+addition.
+
+### Achieved rate and results
+
+Measured **~30 MHz effective sample rate** (33 ns/sample, calibrated via
+`DWT->CYCCNT` against `SystemCoreClock`=480 MHz) — borderline-adequate
+oversampling for 12 Mbit/s full-speed USB (full NRZI+bit-stuff decode
+wants ~48 MHz, but ~30 MHz is enough to see coarse J/K/SE0 line-state
+transitions).
+
+Two synchronized (`usbhost arm`) runs, sizes 4096 and 32768 samples
+(≈137 µs and ≈1.09 ms windows respectively — the larger window
+deliberately spans more than a full 1 ms USB frame period, to rule out
+missing the transaction due to internal host frame-scheduling latency
+after channel-enable):
+
+```
+samples: 32768, cycles: 524353, core_clock_hz: 480000000
+avg_ns_per_sample: 33
+idx=0 DP=0 DM=0 (initial)
+total_transitions: 0
+```
+
+**Both D+ and D− read a constant logic-0 (SE0) for the entire window,
+including the very first "idle" sample before any transaction — zero
+transitions observed, across both window sizes.**
+
+### Important caveat — do not over-interpret this result
+
+PA11/PA12 are configured as `AF10` (routed into the embedded `OTG_FS`
+PHY), not as plain GPIO inputs. It is **not guaranteed** that the
+standard digital input register (`IDR`) faithfully tracks the analog USB
+differential-PHY receive state while a pin is muxed to this alternate
+function — on some STM32 parts the digital input path for
+dedicated PHY-routed pins can be disconnected, forced to a fixed level,
+or simply not meaningful in this mode. A constant-zero readback is
+therefore *consistent with* a dead/broken D+/D− path, but could equally
+be an artifact of this software-capture technique's limitation rather
+than proof of an electrical fault.
+
+### Conclusion
+
+This software capture is a genuinely useful low-effort diagnostic (no
+extra hardware, git-committed as a reusable tool) and its result does not
+contradict the hardware-fault hypothesis — but it cannot be treated as
+final confirmation given the AF10/IDR caveat above. An external
+oscilloscope or USB protocol analyzer probing the physical D+/D− test
+points directly remains the authoritative next step to conclusively
+resolve whether the bus is truly electrically dead or whether this is a
+software-visibility limitation.
