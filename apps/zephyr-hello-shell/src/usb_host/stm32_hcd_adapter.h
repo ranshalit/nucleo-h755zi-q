@@ -23,6 +23,15 @@ uint32_t stm32_hcd_adapter_port_status(void);
  */
 int stm32_hcd_adapter_raw_control_test(void);
 
+/*
+ * usb_debug.md Step 32: hard power-cycle VBUS (PD10) for hold_ms
+ * milliseconds, then re-enable it. Used to test whether a genuine VBUS
+ * power-off/on (not just a D+/D- port reset) recovers a USB device that
+ * may have wedged internally after many prior aborted/incomplete
+ * enumeration attempts without ever actually losing power.
+ */
+void stm32_hcd_adapter_vbus_cycle(uint32_t hold_ms);
+
 #ifdef __cplusplus
 }
 #endif

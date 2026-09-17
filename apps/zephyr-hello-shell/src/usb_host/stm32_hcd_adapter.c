@@ -445,6 +445,32 @@ USBH_StatusTypeDef USBH_LL_DriverVBUS(USBH_HandleTypeDef *phost,
 	return USBH_OK;
 }
 
+void stm32_hcd_adapter_vbus_cycle(uint32_t hold_ms)
+{
+	/*
+	 * usb_debug.md Step 32: a genuine VBUS power-off/on, distinct from
+	 * a D+/D- port reset (USB_ResetPort()/HAL_HCD_ResetPort()) which
+	 * never removes power from the device. After many hours of
+	 * aborted/incomplete enumeration attempts in earlier debugging
+	 * sessions, the attached device may have wedged internally in a
+	 * way only a real power cycle clears - testing that theory here.
+	 */
+	printf("usbhost: vbus_cycle: forcing VBUS off for %lu ms\n",
+	       (unsigned long)hold_ms);
+	LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_10); /* PD10 active-low: set = VBUS off */
+	k_msleep(hold_ms);
+	printf("usbhost: vbus_cycle: PD10=%lu (should be 1/off), PA9=%lu\n",
+	       (unsigned long)LL_GPIO_IsOutputPinSet(GPIOD, LL_GPIO_PIN_10),
+	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9));
+
+	LL_GPIO_ResetOutputPin(GPIOD, LL_GPIO_PIN_10); /* PD10 active-low: reset = VBUS on */
+	k_msleep(200); /* allow inrush/VBUS ramp to settle before enumerating */
+	printf("usbhost: vbus_cycle: VBUS back on, PD10=%lu PA9=%lu HPRT=0x%08lx\n",
+	       (unsigned long)LL_GPIO_IsOutputPinSet(GPIOD, LL_GPIO_PIN_10),
+	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9),
+	       (unsigned long)stm32_hcd_adapter_port_status());
+}
+
 USBH_StatusTypeDef USBH_LL_SetToggle(USBH_HandleTypeDef *phost, uint8_t pipe,
 				     uint8_t toggle)
 {
@@ -496,7 +522,175 @@ int stm32_hcd_adapter_raw_control_test(void)
 
 	uint32_t hprt = *(__IO uint32_t *)((uintptr_t)USBx + USB_OTG_HOST_PORT_BASE);
 
+	/*
+	 * A/B test against the bare-metal reference revealed HPRT.PENA=0
+	 * here (port not enabled), unlike bare-metal which always does an
+	 * explicit port reset right before starting a channel transfer.
+	 * Starting a channel while the port session is not enabled appears
+	 * to make the OTG core auto-halt the channel immediately (CHENA and
+	 * CHDIS both latch with HCINT never updating) - exactly this test's
+	 * long-standing "stuck channel" symptom. Force a fresh port reset
+	 * here so this test matches bare-metal's sequence exactly.
+	 */
+	if (((hprt >> 2) & 0x1U) == 0U) {
+		printf("rawtest: HPRT.PENA=0 (0x%08lx), forcing port reset\n",
+		       (unsigned long)hprt);
+		(void)HAL_HCD_ResetPort(&hcd_handle);
+		k_msleep(50);
+		hprt = *(__IO uint32_t *)((uintptr_t)USBx + USB_OTG_HOST_PORT_BASE);
+		printf("rawtest: HPRT after reset = 0x%08lx\n", (unsigned long)hprt);
+	}
+
+	printf("rawtest: RCC->CR HSI48ON=%lu HSI48RDY=%lu, D2CCIP2R.USBSEL=%lu "
+	       "(0=disable,1=PLL1Q,2=PLL3Q,3=HSI48 - want 3), AHB1ENR.USB2OTGHSEN=%lu\n",
+	       (unsigned long)((RCC->CR & RCC_CR_HSI48ON) != 0),
+	       (unsigned long)((RCC->CR & RCC_CR_HSI48RDY) != 0),
+	       (unsigned long)((RCC->D2CCIP2R & RCC_D2CCIP2R_USBSEL) >>
+			       RCC_D2CCIP2R_USBSEL_Pos),
+	       (unsigned long)((RCC->AHB1ENR & RCC_AHB1ENR_USB2OTGHSEN) != 0));
+	{
+		USB_OTG_HostTypeDef *host_regs =
+			(USB_OTG_HostTypeDef *)((uintptr_t)USBx + USB_OTG_HOST_BASE);
+		uint32_t hfnum_a = host_regs->HFNUM;
+
+		k_msleep(2);
+		uint32_t hfnum_b = host_regs->HFNUM;
+
+		printf("rawtest: HFNUM before=0x%08lx after 2ms=0x%08lx "
+		       "(frame number field should have incremented if SOF/PHY clock is alive)\n",
+		       (unsigned long)hfnum_a, (unsigned long)hfnum_b);
+
+		/*
+		 * Sample FRNUM (bits 15:0 of HFNUM) repeatedly over a longer
+		 * window to conclusively determine whether the host core is
+		 * generating Start-Of-Frame events at all (required every 1ms
+		 * in Full Speed for the core's internal transfer scheduler to
+		 * ever inject a non-periodic/control transfer onto the bus).
+		 */
+		uint16_t frnum_first = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
+		uint16_t frnum_last = frnum_first;
+		int frnum_changed = 0;
+
+		for (int i = 0; i < 20; i++) {
+			k_msleep(1);
+			uint16_t f = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
+
+			if (f != frnum_last) {
+				frnum_changed++;
+			}
+			frnum_last = f;
+		}
+		printf("rawtest: FRNUM over 20ms: first=%u last=%u changed=%d times "
+		       "(0 changes = SOF/scheduler NOT running - core cannot inject transfers)\n",
+		       frnum_first, frnum_last, frnum_changed);
+		printf("rawtest: HFIR=0x%08lx (expected PHY-clock-cycles-per-1ms, FS ~48000)\n",
+		       (unsigned long)host_regs->HFIR);
+
+		/*
+		 * Experiment: bare-metal reference never re-enters the
+		 * HPRT PENCHNG interrupt path that HAL's USB_InitFSLSPClkSel()
+		 * uses to rewrite HFIR to 48000; it stays at the silicon
+		 * reset default of 60000 and SOF/FRNUM cadence is correct
+		 * (~1ms) there. Force HFIR back to 60000 here and re-sweep
+		 * FRNUM to test whether the 48000 value (or the act of
+		 * dynamically rewriting HFIR) is what stalls the SOF/frame
+		 * scheduler under Zephyr.
+		 */
+		host_regs->HFIR = 60000U;
+		uint16_t frnum2_first = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
+		uint16_t frnum2_last = frnum2_first;
+		int frnum2_changed = 0;
+
+		for (int i = 0; i < 20; i++) {
+			k_msleep(1);
+			uint16_t f = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
+
+			if (f != frnum2_last) {
+				frnum2_changed++;
+			}
+			frnum2_last = f;
+		}
+		printf("rawtest: after forcing HFIR=60000: FRNUM over 20ms: first=%u last=%u "
+		       "changed=%d times (HFIR now 0x%08lx)\n",
+		       frnum2_first, frnum2_last, frnum2_changed,
+		       (unsigned long)host_regs->HFIR);
+
+		/*
+		 * PCGCCTL (Power and Clock Gating Control) lives at offset
+		 * 0xE00 from the USB_OTG_FS base, right after the FIFO
+		 * region. Bit0 = STPPCLK (stop PHY clock). If set, the PHY
+		 * clock feeding the frame timer/SOF generator is gated off
+		 * entirely, which would explain both a frozen FRNUM and zero
+		 * D+/D- electrical activity regardless of HFIR's value.
+		 */
+		volatile uint32_t *pcgcctl = (volatile uint32_t *)(((uint32_t)USB_OTG_FS) + 0xE00U);
+		printf("rawtest: PCGCCTL=0x%08lx (bit0=STPPCLK bit1=GATEHCLK)\n",
+		       (unsigned long)*pcgcctl);
+
+		/*
+		 * Direct SOF interrupt-flag test, independent of FRNUM
+		 * register reads: clear GINTSTS.SOF (bit3, W1C) repeatedly
+		 * and count how many times it re-asserts itself within a
+		 * fixed window. If the core is truly generating SOF every
+		 * 1ms, this should re-assert ~5 times in 5ms regardless of
+		 * whether our FRNUM decode is somehow wrong.
+		 */
+		USB_OTG_GlobalTypeDef *greg = (USB_OTG_GlobalTypeDef *)USB_OTG_FS;
+		int sof_count = 0;
+
+		greg->GINTSTS = USB_OTG_GINTSTS_SOF;
+		for (int i = 0; i < 5000; i++) {
+			if (greg->GINTSTS & USB_OTG_GINTSTS_SOF) {
+				sof_count++;
+				greg->GINTSTS = USB_OTG_GINTSTS_SOF;
+			}
+			k_busy_wait(1);
+		}
+		printf("rawtest: SOF interrupt flag reasserted %d times in ~5ms busy-poll window\n",
+		       sof_count);
+	}
 	printf("rawtest: start (HPRT=0x%08lx)\n", (unsigned long)hprt);
+	printf("rawtest: clocks SYSCLK=%lu HCLK=%lu PCLK1=%lu PCLK2=%lu\n",
+	       (unsigned long)HAL_RCC_GetSysClockFreq(),
+	       (unsigned long)HAL_RCC_GetHCLKFreq(),
+	       (unsigned long)HAL_RCC_GetPCLK1Freq(),
+	       (unsigned long)HAL_RCC_GetPCLK2Freq());
+	printf("rawtest: GAHBCFG=0x%08lx GUSBCFG=0x%08lx GCCFG=0x%08lx "
+	       "GRXFSIZ=0x%08lx HNPTXFSIZ=0x%08lx HPTXFSIZ=0x%08lx HCFG=0x%08lx\n",
+	       (unsigned long)USBx->GAHBCFG,
+	       (unsigned long)USBx->GUSBCFG,
+	       (unsigned long)USBx->GCCFG,
+	       (unsigned long)USBx->GRXFSIZ,
+	       (unsigned long)USBx->DIEPTXF0_HNPTXFSIZ,
+	       (unsigned long)USBx->HPTXFSIZ,
+	       (unsigned long)((USB_OTG_HostTypeDef *)((uintptr_t)USBx +
+							USB_OTG_HOST_BASE))->HCFG);
+	extern uint32_t SystemCoreClock;
+	printf("rawtest: SystemCoreClock=%lu SCB->CPACR=0x%08lx SCB->CCR=0x%08lx\n",
+	       (unsigned long)SystemCoreClock,
+	       (unsigned long)SCB->CPACR,
+	       (unsigned long)SCB->CCR);
+
+	/*
+	 * Pausing usb_host_poll_loop() only stops software from calling
+	 * USBH_Process() again - it does NOT touch hardware channel 0,
+	 * which may still be sitting armed (CHENA=1) from the last
+	 * USBH_Process() iteration before the pause took effect. An armed
+	 * channel 0 retransmitting SETUP/IN tokens on the shared D+/D-
+	 * lines at the same time channel 1 tries to transact could corrupt
+	 * the bus and produce a spurious TXERR that has nothing to do with
+	 * channel 1's own config. Explicitly halt channel 0 here so this
+	 * test's bus conditions match bare-metal's (zero other channels
+	 * ever active).
+	 */
+	printf("rawtest: HCCHAR(ch0) before halt = 0x%08lx\n",
+	       (unsigned long)USBx_HC(0)->HCCHAR);
+	if ((USBx_HC(0)->HCCHAR & USB_OTG_HCCHAR_CHENA) != 0U) {
+		(void)HAL_HCD_HC_Halt(&hcd_handle, 0);
+		k_msleep(5);
+	}
+	printf("rawtest: HCCHAR(ch0) after halt = 0x%08lx\n",
+	       (unsigned long)USBx_HC(0)->HCCHAR);
 
 	hc->dev_addr = 0;
 	hc->ch_num = ch;
@@ -529,20 +723,80 @@ int stm32_hcd_adapter_raw_control_test(void)
 	       (unsigned long)USBx_HC(ch)->HCINT,
 	       (unsigned long)USBx->GINTSTS);
 
+	/*
+	 * Disable the shared OTG_FS IRQ for the duration of the poll loop
+	 * *before* starting the transfer, not after. stm32_hcd_isr() ->
+	 * HAL_HCD_IRQHandler() services ALL channels (including channel 0,
+	 * still being retried in the background by ST's USBH middleware/poll
+	 * thread) and contains its own NAK/retry state machine that can
+	 * silently re-arm/rewrite channel registers out from under this
+	 * "bare-metal" test. Disabling the IRQ here means any register
+	 * change we observe below is a raw hardware transition, not a side
+	 * effect of HAL's own software retry logic.
+	 *
+	 * Root cause found by A/B testing against a real bare-metal
+	 * (non-Zephyr) reference: disabling the IRQ *after* calling
+	 * USB_HC_StartXfer() left a race window where, if the SETUP
+	 * transaction completed fast enough, HAL_HCD_IRQHandler() would run
+	 * once, see XFRC, clear HCINT (write-1-to-clear) and issue a
+	 * channel-halt request (CHDIS) that requires a *second* interrupt
+	 * (CHH) to finish disabling the channel. Disabling the IRQ right
+	 * after that first service, before the CHH interrupt could ever
+	 * arrive, permanently froze the channel with CHENA+CHDIS both set
+	 * and HCINT stuck at 0 - exactly the "stuck host channel" symptom
+	 * chased throughout this investigation. Moving irq_disable() to
+	 * before USB_HC_StartXfer() removes the race entirely, matching
+	 * the bare-metal reference which never enables the NVIC IRQ at all.
+	 */
+	irq_disable(STM32_HCD_IRQ);
+
+	/*
+	 * Capture D+/D- immediately around the actual channel start, to
+	 * correlate against the production-path capture (usb_debug.md
+	 * Step 33) that showed zero electrical transitions during a
+	 * TXERR-failing SETUP submission. If this rawtest path -- which
+	 * bit-for-bit matches the bare-metal reference and is known to
+	 * report TXERR under Zephyr -- ALSO shows zero transitions, that
+	 * means the OTG core is reporting TXERR without ever physically
+	 * driving the bus, i.e. the fault is upstream of the pin drivers
+	 * (FIFO push / serializer), not a GPIO/pinmux issue (already ruled
+	 * out separately via `usbhost gpio`).
+	 */
+	usb_gpio_capture_arm();
+
 	ret = USB_HC_StartXfer(USBx, hc, 0 /* no DMA */);
 	printf("rawtest: USB_HC_StartXfer -> %d\n", ret);
 
-	/*
-	 * Disable the shared OTG_FS IRQ for the duration of the poll loop.
-	 * stm32_hcd_isr() -> HAL_HCD_IRQHandler() services ALL channels
-	 * (including channel 0, still being retried in the background by
-	 * ST's USBH middleware/poll thread) and contains its own NAK/retry
-	 * state machine that can silently re-arm/rewrite channel registers
-	 * out from under this "bare-metal" test. Disabling the IRQ here
-	 * means any register change we observe below is a raw hardware
-	 * transition, not a side effect of HAL's own software retry logic.
-	 */
-	irq_disable(STM32_HCD_IRQ);
+	if (usb_gpio_capture_armed()) {
+		usb_gpio_capture_run(USB_GPIO_CAPTURE_MAX_SAMPLES);
+		usb_gpio_capture_disarm();
+	}
+	{
+		const uint32_t *cbuf;
+		uint32_t ccount, ccycles, transitions = 0;
+
+		usb_gpio_capture_get(&cbuf, &ccount, &ccycles);
+		if (ccount > 0U) {
+			uint32_t prev = cbuf[0] & ((1U << 11) | (1U << 12));
+
+			for (uint32_t i = 1; i < ccount; i++) {
+				uint32_t cur = cbuf[i] & ((1U << 11) | (1U << 12));
+
+				if (cur != prev) {
+					transitions++;
+					prev = cur;
+				}
+			}
+			printf("rawtest: dpdm capture: samples=%u cycles=%u "
+			       "transitions=%u initial DP=%u DM=%u\n",
+			       (unsigned)ccount, (unsigned)ccycles,
+			       (unsigned)transitions,
+			       (unsigned)((cbuf[0] >> 12) & 1U),
+			       (unsigned)((cbuf[0] >> 11) & 1U));
+		} else {
+			printf("rawtest: dpdm capture: no samples (arm/trigger mismatch)\n");
+		}
+	}
 
 	for (int i = 0; i < 100; i++) {
 		uint32_t hcint = USBx_HC(ch)->HCINT;

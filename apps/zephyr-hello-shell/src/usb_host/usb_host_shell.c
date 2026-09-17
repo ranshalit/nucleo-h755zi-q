@@ -17,6 +17,7 @@
 
 K_THREAD_STACK_DEFINE(usb_host_poll_stack, USB_HOST_POLL_THREAD_STACK_SIZE);
 static struct k_thread usb_host_poll_thread;
+static atomic_t usb_host_poll_paused = ATOMIC_INIT(1);
 static USBH_HandleTypeDef usb_host;
 static int usb_host_init_result = -EAGAIN;
 
@@ -103,11 +104,13 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 	ARG_UNUSED(arg3);
 
 	while (true) {
-		(void)USBH_Process(&usb_host);
-		if (usb_host.gState == HOST_CHECK_CLASS &&
-		    usb_host.ClassNumber == 0U) {
-			printf("ST USBH: enumeration complete; no class driver registered\n");
-			usb_host.gState = HOST_ABORT_STATE;
+		if (!atomic_get(&usb_host_poll_paused)) {
+			(void)USBH_Process(&usb_host);
+			if (usb_host.gState == HOST_CHECK_CLASS &&
+			    usb_host.ClassNumber == 0U) {
+				printf("ST USBH: enumeration complete; no class driver registered\n");
+				usb_host.gState = HOST_ABORT_STATE;
+			}
 		}
 		k_msleep(USB_HOST_POLL_PERIOD_MS);
 	}
@@ -273,13 +276,125 @@ static int cmd_usbhost_arm(const struct shell *shell, size_t argc, char **argv)
 
 static int cmd_usbhost_rawtest(const struct shell *shell, size_t argc, char **argv)
 {
+	int ret;
+
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
+	/*
+	 * Hypothesis (usb_debug.md Step 31): the USBH middleware's
+	 * background poll thread keeps retrying channel 0 against the same
+	 * device concurrently with this test's channel 1. Pause it here so
+	 * the raw test has the bus to itself, matching the bare-metal A/B
+	 * test's conditions exactly (nothing else driving the core).
+	 *
+	 * The poll thread now starts paused by default (see
+	 * usb_host_poll_paused's initializer), so if this command is the
+	 * first USB host activity since boot, the core has never seen a
+	 * channel-0 transaction at all - matching bare-metal even more
+	 * closely than just pausing mid-stream. Use `usbhost resume` first
+	 * if you want the normal enumeration flow running before this test.
+	 */
+	atomic_set(&usb_host_poll_paused, 1);
+	k_msleep(5); /* let any in-flight USBH_Process() iteration finish */
+
 	shell_print(shell,
 		    "running bare-metal HAL HC_Init/StartXfer control test "
-		    "(bypasses USBH middleware); watch console for 'rawtest:' lines");
-	return stm32_hcd_adapter_raw_control_test();
+		    "(bypasses USBH middleware, middleware polling paused); "
+		    "watch console for 'rawtest:' lines");
+	ret = stm32_hcd_adapter_raw_control_test();
+
+	atomic_set(&usb_host_poll_paused, 0);
+	return ret;
+}
+
+static int cmd_usbhost_pause(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	atomic_set(&usb_host_poll_paused, 1);
+	shell_print(shell, "usbh middleware polling paused");
+	return 0;
+}
+
+static int cmd_usbhost_resume(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	atomic_set(&usb_host_poll_paused, 0);
+	shell_print(shell, "usbh middleware polling resumed");
+	return 0;
+}
+
+static int cmd_usbhost_vbuscycle(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t hold_ms = 2000;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	/*
+	 * Pause the middleware poll thread during the cycle so it doesn't
+	 * fight over PD10/HPRT state while we force a real power-off/on,
+	 * matching the isolation approach used by `usbhost rawtest`.
+	 */
+	atomic_set(&usb_host_poll_paused, 1);
+	k_msleep(5);
+
+	shell_print(shell, "hard power-cycling VBUS for %u ms; watch console",
+		    hold_ms);
+	stm32_hcd_adapter_vbus_cycle(hold_ms);
+
+	atomic_set(&usb_host_poll_paused, 0);
+	return 0;
+}
+
+static int cmd_usbhost_gpio(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	/*
+	 * Dump the live GPIOA config for PA11 (D-)/PA12 (D+) directly from
+	 * silicon, to check whether the pins are actually still configured
+	 * as AF10 push-pull (as our adapter_init_hardware() sets them) at
+	 * the moment a D+/D- capture shows zero electrical activity, or
+	 * whether something else (e.g. Zephyr's own pinctrl/gpio subsystem)
+	 * has reconfigured them since boot.
+	 */
+	uint32_t moder = GPIOA->MODER;
+	uint32_t afrh = GPIOA->AFR[1]; /* AF for pins 8-15 */
+	uint32_t otyper = GPIOA->OTYPER;
+	uint32_t ospeedr = GPIOA->OSPEEDR;
+	uint32_t pupdr = GPIOA->PUPDR;
+	uint32_t idr = GPIOA->IDR;
+
+	shell_print(shell, "GPIOA base=0x%08lx", (unsigned long)GPIOA);
+	shell_print(shell, "MODER=0x%08lx (PA11=%lu PA12=%lu; 00=in 01=out 10=AF 11=analog)",
+		    (unsigned long)moder,
+		    (unsigned long)((moder >> (11 * 2)) & 0x3U),
+		    (unsigned long)((moder >> (12 * 2)) & 0x3U));
+	shell_print(shell, "AFRH=0x%08lx (PA11 AF=%lu PA12 AF=%lu; want 10=AF10)",
+		    (unsigned long)afrh,
+		    (unsigned long)((afrh >> ((11 - 8) * 4)) & 0xFU),
+		    (unsigned long)((afrh >> ((12 - 8) * 4)) & 0xFU));
+	shell_print(shell, "OTYPER=0x%08lx (PA11=%lu PA12=%lu; 0=push-pull)",
+		    (unsigned long)otyper,
+		    (unsigned long)((otyper >> 11) & 0x1U),
+		    (unsigned long)((otyper >> 12) & 0x1U));
+	shell_print(shell, "OSPEEDR=0x%08lx (PA11=%lu PA12=%lu; want 11=very high)",
+		    (unsigned long)ospeedr,
+		    (unsigned long)((ospeedr >> (11 * 2)) & 0x3U),
+		    (unsigned long)((ospeedr >> (12 * 2)) & 0x3U));
+	shell_print(shell, "PUPDR=0x%08lx (PA11=%lu PA12=%lu; want 00=no pull)",
+		    (unsigned long)pupdr,
+		    (unsigned long)((pupdr >> (11 * 2)) & 0x3U),
+		    (unsigned long)((pupdr >> (12 * 2)) & 0x3U));
+	shell_print(shell, "IDR=0x%08lx (PA11(D-)=%lu PA12(D+)=%lu, live now)",
+		    (unsigned long)idr,
+		    (unsigned long)((idr >> 11) & 0x1U),
+		    (unsigned long)((idr >> 12) & 0x1U));
+	return 0;
 }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
@@ -295,6 +410,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(rawtest, NULL,
 		  "Bare-metal HAL-only control transfer test, bypassing USBH middleware",
 		  cmd_usbhost_rawtest),
+	SHELL_CMD(pause, NULL,
+		  "Pause the USBH middleware's background poll thread",
+		  cmd_usbhost_pause),
+	SHELL_CMD(resume, NULL,
+		  "Resume the USBH middleware's background poll thread",
+		  cmd_usbhost_resume),
+	SHELL_CMD(vbuscycle, NULL,
+		  "Hard power-cycle VBUS (PD10 off/on) to recover a wedged device",
+		  cmd_usbhost_vbuscycle),
+	SHELL_CMD(gpio, NULL,
+		  "Dump live PA11/PA12 GPIO mode/AF/speed/pull registers",
+		  cmd_usbhost_gpio),
 	SHELL_SUBCMD_SET_END
 );
 

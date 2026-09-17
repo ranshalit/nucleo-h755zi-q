@@ -2086,3 +2086,452 @@ in Step 30), or a race between Zephyr's channel-arm path and its ISR.
    in Step 30 remains an open documentation gap, but is now
    deprioritized given the bare-metal result already rules out a
    hardware/errata-level explanation.
+
+## Step 32 — Bit-for-bit clock/register match still fails; port-reset gap found, but "electrical" theory falsified by the bare-metal precedent
+
+### Goal
+
+Cross-analyze the clock/register dumps captured from the Zephyr
+rawtest against the bare-metal reference (Step 31) to find the actual
+software difference behind the stuck `CHENA+CHDIS`/`HCINT=0` channel
+symptom, per the user's suggestion that pinmux/clock differences were
+worth checking.
+
+### Clock tree: 480 MHz vs 400 MHz ruled out
+
+The Zephyr board's devicetree (`nucleo_h755zi_q_stm32h755xx_m7.dts`)
+configures `PLL1` (`M=1, N=120, P=2`) from the 8 MHz HSE bypass for a
+**480 MHz** `SYSCLK` (`HCLK=240 MHz`, `PCLK1/2=120 MHz`), requiring
+`VOS0` (over-drive) — a genuinely different, deliberate clock config
+from the bare-metal test's conservative 400 MHz (`VOS1`) config
+inherited from ST's `GPIO_Demo` template.
+
+Reconfigured the bare-metal test's `SystemClock_Config()` to the exact
+same `PLL1`/`VOS0`/480 MHz tree as the Zephyr board and re-ran it:
+
+```
+bare-metal usbh rawtest: boot OK
+clocks SYSCLK=480000000 HCLK=240000000 PCLK1=120000000 PCLK2=120000000
+HAL_HCD_Init OK
+HAL_HCD_Start OK
+HPRT after VBUS+200ms = 0x00021403 (PCSTS=1 PENA=0)
+HPRT after port reset = 0x0002140f
+HAL_HCD_HC_Init(ch=1) -> 0
+USB_HC_StartXfer -> 0
+poll[00] HCINT=0x00000021 HCCHAR=0x20100040 ...
+HCINT went non-zero after 0 polls, stopping
+```
+
+**Bare-metal still succeeds instantly at 480 MHz** — same clean
+`HCINT=0x21` (XFRC+ACK) on poll 0. The 480 MHz vs 400 MHz clock
+difference is **ruled out**.
+
+### Static register dump: identical on both sides
+
+Added the same `GAHBCFG`/`GUSBCFG`/`GCCFG`/`GRXFSIZ`/`HNPTXFSIZ`/
+`HPTXFSIZ`/`HCFG` dump to bare-metal (now at matching 480 MHz) and
+compared directly against Zephyr's rawtest dump:
+
+| Register | Bare-metal (480 MHz) | Zephyr rawtest |
+|---|---|---|
+| GAHBCFG | `0x00000001` | `0x00000001` |
+| GUSBCFG | `0x20001440` | `0x20001440` |
+| GCCFG | `0x00010000` | `0x00010000` |
+| GRXFSIZ | `0x00000200` | `0x00000200` |
+| HNPTXFSIZ | `0x01000200` | `0x01000200` |
+| HPTXFSIZ | `0x00e00300` | `0x00e00300` |
+| HCFG | `0x00000200`/`0x00000201`* | `0x00000200` |
+
+*(HCFG differs only because it's read before vs. after `USB_HC_Init()`
+sets the speed field on Zephyr's side in one capture — not a real
+config difference; the `HCD_HandleTypeDef.Init` struct fields
+`Host_channels/speed/dma_enable/phy_itface/Sof_enable/
+low_power_enable/vbus_sensing_enable/use_external_vbus` were confirmed
+identical by direct source comparison.)
+
+**Every static register and clock value now matches bit-for-bit.**
+This rules out clock config, FIFO sizing, and core mode/PHY selection
+as the difference.
+
+### `HAL_PWREx_EnableUSBVoltageDetector()` and PA9/PA10 GPIO config ruled out
+
+Checked two more candidate differences from `adapter_init_hardware()`
+that bare-metal's `main.c` never does at all: the USB 3.3V voltage
+detector wait (`HAL_PWREx_EnableUSBVoltageDetector()`/
+`PWR_FLAG_USB33RDY`) and PA9 (VBUS sense input)/PA10 (ID pin, AF10)
+GPIO configuration. Bare-metal succeeds with neither of these present,
+so their absence in bare-metal (and presence in Zephyr) cannot be
+the cause of Zephyr's failure — ruled out.
+
+### The real gap found: rawtest was missing an explicit port reset
+
+Dumping `HPRT` at the very start of the Zephyr rawtest (before this
+session's fix) showed `PCSTS=1` but **`PENA=0`** — the port was
+*connected* but never *enabled*, because the rawtest command assumed
+the background USBH middleware (or the shell's earlier `usbhost arm`/
+`descriptor` flows) had already reset/enabled the port. Bare-metal, in
+contrast, always performs an explicit port reset (`HPRT.PRST`
+pulse + settle delays) immediately before starting any channel
+transfer. Added the same explicit `HAL_HCD_ResetPort()` call (guarded
+on `PENA==0`) to `stm32_hcd_adapter_raw_control_test()`:
+
+```c
+if (((hprt >> 2) & 0x1U) == 0U) {
+    printf("rawtest: HPRT.PENA=0 (0x%08lx), forcing port reset\n", ...);
+    (void)HAL_HCD_ResetPort(&hcd_handle);
+    k_msleep(50);
+    ...
+}
+```
+
+After this fix, `HPRT` correctly shows `PENA=1` before the transfer,
+and `HCINT` **does now update** instead of staying frozen at `0`:
+
+```
+rawtest: HPRT.PENA=0 (0x00021401), forcing port reset
+rawtest: HPRT after reset = 0x00021405
+...
+rawtest: poll[00] HCINT=0x00000080 HCCHAR=0xc0100040 ...
+rawtest: HCINT went non-zero after 0 polls, stopping
+```
+
+`HCINT=0x00000080` decodes to **`TXERR`** (bit 7, Transaction Error) —
+a real, hardware-reported "no response from device" condition, not a
+stuck/frozen register. This is progress: the previous "CHENA+CHDIS
+both set, HCINT stuck at 0 forever" symptom in the rawtest was masking
+a real transaction error underneath a missing-port-reset bug in the
+test harness itself. With the harness fixed, the rawtest's result now
+matches what the *production* USBH middleware path independently
+reports on channel 0 in the same session (`HCINT=0x00000000`,
+`HC_state=HC_HALTED (2)`, repeated `"unrecovered error"` /
+`"Control error: Device not responding"` messages, cycling through
+disconnect/reconnect/reset without ever completing enumeration).
+
+### Initial (retracted) hypothesis: electrical/VBUS
+
+TXERR was initially (incorrectly) attributed to a physical/power-layer
+cause (e.g. VBUS sag under the camera's inrush/current draw), since
+`HPRT`/`PA9`/`PG7 (nFAULT)` all looked electrically normal
+(`PCSTS=1`, `PENA=1`, no over-current fault) and all *static*
+registers matched the working bare-metal reference exactly.
+
+**This hypothesis was falsified by the user, correctly pointing out
+that the bare-metal test used the exact same board, same `USB_OTG_FS`
+peripheral, same CN13 connector, same cable, and the same physical
+camera — and got a clean `HCINT=0x21` (XFRC+ACK) success on the very
+first SETUP transaction (Step 31 and its 480 MHz re-run above).** If
+the camera's power draw or the board's VBUS supply were physically
+inadequate, bare-metal would have failed identically. It didn't. The
+cause must still be dynamic/software or device-state related, not
+electrical capability.
+
+### Current leading theory: device wedged by many hours of aborted resets, needs a real VBUS power-cycle
+
+The camera has been through many hours of repeated incomplete
+enumeration attempts across this entire debugging session (`ST USBH`
+disconnect/reconnect/reset loops, `usbhost rawtest` runs, etc.) without
+ever having its `VBUS` actually removed — `USBH_LL_DriverVBUS()`
+control (`PD10`) was left continuously asserted throughout. It is
+plausible the camera's own USB controller has wedged into a
+non-responsive state that only a genuine power-off/on (not a mere
+D+/D- line reset, which is all `HAL_HCD_ResetPort()`/`USB_ResetPort()`
+does) would clear.
+
+Added a new, software-only diagnostic to test this without requiring
+any physical hardware action:
+
+- `stm32_hcd_adapter_vbus_cycle(uint32_t hold_ms)` in
+  `stm32_hcd_adapter.c`: forces `PD10` high (VBUS off, active-low) for
+  `hold_ms`, then low again (VBUS on) with a 200 ms inrush/ramp settle
+  delay, logging `PD10`/`PA9`/`HPRT` at each step.
+- `usbhost vbuscycle` shell command in `usb_host_shell.c`: pauses the
+  middleware poll thread, calls the above with a 2-second hold, then
+  resumes polling.
+
+### Status / next steps
+
+1. Flash the firmware with `usbhost vbuscycle` added (in progress as
+   of this writing).
+2. Run `usbhost vbuscycle` to force a genuine VBUS power-off/on for the
+   camera, then `usbhost rawtest` again to see if `HCINT` finally shows
+   a clean completion instead of `TXERR`, mirroring bare-metal's
+   result.
+3. If the power-cycle theory is confirmed, the true "production" fix
+   is likely: (a) always power-cycle VBUS on `USBH_LL_Connect()`/
+   enumeration-retry paths instead of only resetting the port, or (b)
+   diagnose why this specific device needs a longer post-power-on
+   settle time before responding to SETUP than what
+   `USBH_LL_DriverVBUS()`'s existing 100 ms delay provides.
+4. If the power-cycle does *not* fix it, the remaining candidates are
+   narrower still: dynamic IRQ/NVIC timing differences between
+   bare-metal's polling-only approach and Zephyr's interrupt-driven
+   `HAL_HCD_IRQHandler()` path, or USBH middleware's own channel/URB
+   state machine issuing register writes (e.g. `CHDIS`) concurrently
+   with the rawtest/production channel in ways not yet fully traced.
+5. Camera physically remained plugged into CN13 throughout this
+   entire step, matching all prior steps back to Step 1 — no cable or
+   connector was changed.
+
+## Step 33 — vbuscycle result (falsified), channel-0-collision theory (falsified), Ethernet/EMI theory (falsified), reset-timing double-checked (not the cause), bare-metal reconfirmed to still succeed *right now*
+
+Ran the plan from Step 32:
+
+1. **`usbhost vbuscycle` (real VBUS power-off/on)** — confirmed genuine
+   power removal via `PA9` going `0` then `1`. Ran `usbhost rawtest`
+   and the production middleware immediately afterward: **both still
+   failed identically** (`HCINT=0x80` TXERR in rawtest; production's
+   `HC_state=2`/"unrecovered error" loop unchanged). **The
+   "wedged-by-history-of-failed-attempts" theory is falsified** — a
+   genuine electrical power cycle of the device does not help.
+
+2. **Channel-0-collision theory** ("production's own channel 0 might
+   still be armed/`CHENA=1` and colliding on the shared D+/D- lines
+   with the rawtest's channel 1"): added instrumentation dumping
+   `HCCHAR(ch0)` before/after an explicit `HAL_HCD_HC_Halt()` call at
+   the top of `stm32_hcd_adapter_raw_control_test()`. Rebuilt, reflashed,
+   ran `rawtest`: `HCCHAR(ch0)` read `0x00000000` (or, in a later run,
+   `0x20100040` with `CHENA` bit **clear** either way) both before and
+   after the halt call — **channel 0 was never actually armed**, so
+   halting it was a no-op. **This theory is falsified.** `HCINT=0x80`
+   TXERR persisted regardless.
+
+3. **Reset-timing double-check** (per explicit user request — "maybe
+   timing of signal is important as part of reset"): compared the
+   exact reset pulse widths.
+   - Bare-metal (`/tmp/usbh_bare_test/main.c`): manual `HPRT.PRST`
+     assert for `HAL_Delay(20)`, deassert for `HAL_Delay(20)` — 40 ms
+     total.
+   - Zephyr rawtest's fix calls `HAL_HCD_ResetPort()` →
+     `USB_ResetPort()` in ST's HAL, which asserts `PRST` for
+     `HAL_Delay(100)` and deasserts for `HAL_Delay(10)` (110 ms), plus
+     an additional `k_msleep(50)` added around it — **160 ms total**,
+     i.e. **4x longer and more spec-conservative** than bare-metal's
+     sequence, not shorter. Port state after reset
+     (`HPRT=0x00021405`: `PCSTS=1, PENA=1, PSPD=1` Full Speed,
+     `PPWR=1`) is electrically identical to bare-metal's own
+     post-reset state. **Reset timing is ruled out** — if anything
+     Zephyr's is safer than the sequence that's proven to work.
+
+4. **Ethernet/EMI-contention theory** (Zephyr runs the Ethernet
+   MAC/PHY, netif, and SysTick concurrently; bare-metal runs nothing
+   else, so physically-adjacent-pin crosstalk during Ethernet TX/RX
+   could theoretically corrupt the SETUP transaction): ran
+   `net iface down 1` to fully quiesce the Ethernet interface, then
+   `usbhost rawtest` again. **Result unchanged**: `HCINT=0x80` TXERR
+   on the very first poll. **This theory is falsified.**
+
+5. **USB-device-stack-conflict theory**: the board's stock devicetree
+   labels the OTG_FS peripheral node `zephyr_udc0` (Zephyr's naming
+   convention for a USB *device* controller) with
+   `pinctrl-0 = <&usb_otg_fs_dm_pa11 &usb_otg_fs_dp_pa12>` and
+   `status = "okay"`, raising the concern that Zephyr's own USB device
+   stack might be silently initialized in parallel with our raw-HAL
+   host code, fighting over the same peripheral/pins. Checked the
+   actual build's generated `.config`
+   (`/tmp/stm32h7-zephyr-hello-shell/zephyr/.config`): **no
+   `CONFIG_USB_DEVICE_STACK`, no `CONFIG_UDC_*` symbols are set at
+   all** — the device-mode driver is not compiled in, so there is no
+   competing UDC instance. **This theory is falsified.**
+
+6. **Critical control re-run**: re-flashed the *exact* bare-metal
+   `.bin` (unchanged since Step 31/32, timestamp confirmed to be from
+   earlier this same session) with the *same physical camera, cable,
+   and connector* that has just been failing under Zephyr for hours,
+   right now, live:
+   ```
+   HPRT after VBUS+200ms = 0x00021403 (PCSTS=1 PENA=0)
+   HPRT after port reset = 0x0002140f
+   poll[00] HCINT=0x00000021 HCCHAR=0x20100040 HCTSIZ=0x20000008 HFNUM=0x20d8001b HPRT=0x0002140f
+   HCINT went non-zero after 0 polls, stopping
+   ```
+   **`HCINT=0x21` = `XFRC`+`ACK` — clean success, instantly, on the
+   first attempt.** This conclusively rules out camera/cable/connector
+   degradation from hours of repeated failed enumeration attempts as
+   an explanation: the identical physical setup works perfectly under
+   bare-metal moments before/after failing identically under Zephyr.
+
+### Status after Step 33
+
+Every concrete, testable hypothesis for *why* Zephyr's USB host
+transaction fails while bare-metal's identical transaction succeeds
+has now been individually tested and falsified: clock tree, static
+core/FIFO registers, PWR/GPIO config, port-reset timing, VBUS
+electrical capability, "wedged device" history, channel-0 bus
+collision, Ethernet/EMI contention, and USB-device-stack conflict are
+all ruled out by direct measurement. The paradox remains: same board,
+same connector, same cable, same camera, same registers, same reset
+sequence, tested minutes apart — bare-metal succeeds every time,
+Zephyr's `HCINT` reports genuine hardware-level `TXERR` every time.
+
+Remaining untested candidates, roughly in order of plausibility:
+1. **Interrupt/NVIC-driven timing jitter**: even with
+   `irq_disable(STM32_HCD_IRQ)` in the rawtest, Zephyr's SysTick tick
+   and other enabled interrupts (I2C, tick, etc.) are still live and
+   could delay the CPU's response inside the tight polling window
+   right after `USB_HC_StartXfer()`, in a way a bare-metal busy-loop
+   with fewer active peripherals never experiences. Untested because
+   it requires either disabling all other interrupts too (a coarse
+   test) or genuine cycle-accurate instrumentation.
+2. **A byte-level SETUP-packet or FIFO-write corruption** from
+   cache/MPU differences between bare-metal's and Zephyr's default
+   memory attributes — considered but currently judged unlikely for
+   this specific 8-byte `static const`-like buffer, since it is
+   written once at boot (from the `.data` load) and never mutated at
+   runtime, so there is no write-then-stale-read window; would need
+   an actual bit-level capture of the D+/D- line during the failing
+   Zephyr SETUP token to confirm or rule out.
+3. **Direct electrical capture (software logic-analyzer style GPIO
+   sampling) of the D+/D- lines** during both the succeeding
+   bare-metal SETUP and the failing Zephyr SETUP, to see if the
+   physical waveform itself differs (voltage levels, edge timing,
+   glitches) — this is the most conclusive remaining option since
+   every software/register-level avenue has been exhausted without
+   result.
+
+### Note: Zephyr has no upstream USB Host (UHC) driver for STM32/DWC2 at all
+
+Prompted by ST's "Zephyr ecosystem support" marketing page, checked
+whether the vendored Zephyr tree
+(`vendor/zephyrproject/zephyr/drivers/usb/uhc/`) has *any* native
+host-controller driver for STM32's OTG_FS/HS (Synopsys DesignWare
+Core 2, "DWC2") peripheral. It does not:
+
+- `drivers/usb/uhc/` only contains `uhc_virtual.c`, the NXP
+  `uhc_mcux_{ip3516hs,khci,ehci,ohci}.c` drivers, and
+  `uhc_max3421e.c` (an external USB-host-over-SPI chip). **No
+  `uhc_dwc2.c` exists anywhere in the tree.**
+- The only DWC2-related driver present is `drivers/usb/udc/udc_dwc2.c`
+  — **device-mode (UDC) only** — plus its devicetree bindings
+  (`snps,dwc2.yaml`, `st,stm32f4-fsotg.yaml`), which likewise only back
+  the device-mode driver.
+
+**Conclusion**: ST's "full Zephyr support" claim covers device-mode
+USB (and other peripherals), not USB Host on this SoC family — Zephyr
+upstream has zero native USB Host support for any STM32 OTG DWC2 core,
+so there is no alternate/official code path we could or should be
+using instead. This project's `stm32_hcd_adapter.c` (raw ST HAL
+`HCD_*` calls + ST's USBH middleware, entirely bypassing Zephyr's
+`subsys/usb/host`/UHC framework) is not a workaround around some other
+working Zephyr subsystem — it *is* the only USB host stack that exists
+for this hardware in this ecosystem today. This also confirms there is
+no hidden competing Zephyr USB-host driver silently contending for the
+OTG_FS peripheral: the TXERR bug is entirely contained within this
+project's own custom glue/ST middleware, not an upstream Zephyr defect.
+
+## Step 34 — D+/D- confirmed electrically silent; SOF/frame-timer confirmed genuinely dead under Zephyr (not a register misconfiguration)
+
+Continuing from Step 33, added a software D+/D- GPIO capture tool
+(`usb_gpio_capture.c/.h`, a tight DWT-cycle-counted `GPIOA->IDR`
+sampler) already wired into `USBH_LL_SubmitURB()` and into the
+`rawtest` shell command.
+
+- **Production path capture** (`usbhost arm` + `usbhost resume`):
+  32768 samples over ~1.08ms during a real failing SETUP submission —
+  **zero transitions**, D+/D- both stuck at 0 (SE0) the entire window.
+- **Isolated `rawtest` capture** (bypasses USBH middleware entirely,
+  bare HAL `HC_Init`/`StartXfer`): same result — **zero transitions**,
+  even though `HCINT` sometimes reports `0x21` (success!) instead of
+  the usual `0x80` (TXERR). So the bus never visibly toggles either
+  way, success or failure.
+- Added a `usbhost gpio` shell command dumping live
+  `GPIOA->MODER/AFR[1]/OTYPER/OSPEEDR/PUPDR/IDR` for PA11(D-)/PA12(D+):
+  **pinmux is bit-for-bit correct** (AF10, push-pull, very-high speed,
+  no pull) — ruled out.
+- Added RCC diagnostics: `HSI48ON=1 HSI48RDY=1`,
+  `D2CCIP2R.USBSEL=3` (=HSI48, correctly selected — initially
+  misread as "disabled" because `0b11` looks like "all bits set"; the
+  LL header defines `HSI48=0b11`, `DISABLE=0b00` — corrected), and
+  `AHB1ENR.USB2OTGHSEN=1`. **Clock source config is provably correct.**
+
+### FRNUM/SOF timing anomaly discovered, then run to ground
+
+- `HFNUM` sampled over a 20×1ms loop: bare-metal's `FRNUM` (low 16
+  bits, increments once per SOF) changed **20/20 times** — perfect 1ms
+  cadence. Zephyr's `FRNUM` changed only **0–1 times in the same
+  20ms** — i.e. SOF is essentially not firing.
+- `HFIR` (expected interval register) differs: bare-metal reads back
+  the **silicon reset default `0x0000EA60` (60000)**, Zephyr reads
+  `0x0000BB80` (48000, the value ST's HAL's
+  `USB_InitFSLSPClkSel(HCFG_48_MHZ)` writes on the port-enable-changed
+  interrupt path). This looked like a smoking gun (48000 cycles at a
+  slower-than-expected effective clock would produce a slow SOF), but:
+  - **Forcing `HFIR` back to `60000` in Zephyr's `rawtest` did NOT
+    restore normal cadence** — a re-swept FRNUM immediately after the
+    forced write still showed **0 changes in 20ms**. This falsifies
+    "wrong HFIR value" as the cause; it's not a frame-interval
+    miscalculation, the frame timer just isn't ticking at all.
+  - Read `PCGCCTL` (Power/Clock Gating Control, offset `0xE00`): `0`
+    in both builds (`STPPCLK`/`GATEHCLK` both clear) — **the PHY/AHB
+    clock gate is not disabling anything; ruled out.**
+- **Definitive, register-read-artifact-proof test**: instead of
+  reading `HFNUM`/`FRNUM` (a data register), directly polled the raw
+  `GINTSTS.SOF` **interrupt status flag** (write-1-to-clear), clearing
+  it and counting how many times it re-asserts itself over a fixed
+  ~5ms busy-poll window, on both builds:
+  - **Bare-metal: reasserted 32 times in ~5ms** — SOF is genuinely,
+    repeatedly firing.
+  - **Zephyr: reasserted 0 times in the same ~5ms window** — SOF is
+    **not firing at all**, full stop. This is not a decode or
+    register-alignment issue (same struct/offsets work fine for
+    `PCGCCTL`/`HFIR`); the raw hardware interrupt-pending bit for SOF
+    simply never sets under Zephyr.
+
+### What this rules in/out
+
+All host-mode configuration registers touched by the driver
+(`GAHBCFG=0x00000001`, `GUSBCFG=0x20001440`, `GCCFG=0x00010000`,
+`PCGCCTL=0x0`, `HFIR` after forcing to match) are **identical or
+equivalent** between the working bare-metal reference and the failing
+Zephyr build. The one register that differs (`HCFG.FSLSPCS`: bare-metal
+reads back `00` — its unconfigured reset default, because bare-metal's
+build never processes the HPRT `PENCHNG` interrupt path that would
+normally rewrite it — vs Zephyr's `01`/48MHz) was tested directly by
+forcing values and does **not** explain the SOF freeze either.
+
+This means the root cause is **not a static register misconfiguration
+at all** — every register we can read says "this should work." The
+OTG core's internal SOF/frame-timer state machine itself is not
+running under Zephyr, which is consistent with (and directly explains)
+the earlier D+/D- zero-activity finding, since the core's internal
+non-periodic-transfer scheduler is gated by the SOF/frame timer.
+
+### Attempted follow-up test (not completed): AHB bus contention from Ethernet
+
+Hypothesized that a concurrently-active peripheral (Ethernet MAC/DMA,
+the only significant other AHB bus master active in this app that
+bare-metal doesn't have) might be stalling the OTG core's internal
+timer via bus arbitration contention. Attempted to disable
+`CONFIG_NETWORKING`/`CONFIG_NET_L2_ETHERNET` in `prj.conf` to test this
+in isolation, but **the app has a hard compile-time dependency on
+networking** (`http_server.c`'s `HTTP_SERVICE_DEFINE` and
+`CONFIG_NET_CONFIG_PEER_IPV4_ADDR` fail to build without it) — this
+would require non-trivial `#ifdef`-gating of `http_server.c` to test
+cleanly, so it was reverted rather than restructuring the app. This
+remains an open, untested hypothesis for a future session.
+
+### Updated conclusion / next-step candidates
+
+- The bug is a genuine **hardware state-machine problem** (SOF
+  generator not running), not a value programmed into any
+  register we've been able to inspect so far.
+- Candidates not yet tested:
+  1. AHB bus contention from Ethernet (see above — needs
+     `http_server.c` refactor to test cleanly).
+  2. Some other Zephyr-boot-time interaction with the OTG core
+     *before* our own `HAL_HCD_Init()` runs (e.g., a stray IRQ, a
+     partial/previous init attempt, or a shared-resource conflict from
+     another driver touching AHB1ENR/D2CCIP2R after our code sets it)
+     that leaves the core in a state from which `USB_CoreReset()`
+     (which does correctly wait for `GRSTCTL.AHBIDL` and poll
+     `GRSTCTL.CSRST` self-clear — verified identical in both builds)
+     doesn't fully recover.
+  3. Actual measured HSI48 oscillator frequency/trim under Zephyr vs
+     bare-metal (both report `HSI48RDY=1`, but an out-of-spec real
+     frequency, e.g. due to some calibration difference, has not been
+     independently measured with an external reference).
+- All changes this step are additive diagnostics in
+  `stm32_hcd_adapter.c`'s `rawtest` path (HFIR-force experiment,
+  `PCGCCTL` read, `GINTSTS.SOF`-reassert counter) and the equivalent
+  instrumentation in the scratch bare-metal reference
+  (`/tmp/usbh_bare_test/main.c`, not in git). No production-path logic
+  was changed.
