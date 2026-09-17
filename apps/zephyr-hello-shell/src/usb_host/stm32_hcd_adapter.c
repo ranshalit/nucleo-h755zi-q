@@ -470,3 +470,98 @@ void USBH_Delay(uint32_t delay)
 {
 	k_msleep(delay);
 }
+
+int stm32_hcd_adapter_raw_control_test(void)
+{
+	static uint8_t setup_pkt[8] __aligned(4) = {
+		0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00,
+	}; /* GET_DESCRIPTOR(DEVICE), wLength=64, bmRequestType=IN */
+	/*
+	 * Use channel 1, not 0: ST's USBH middleware's own control pipe
+	 * already occupies channel 0 and keeps retrying in the background
+	 * (usb_host_poll_loop() -> USBH_Process()), which would corrupt this
+	 * test's results if both drove the same channel concurrently.
+	 */
+	uint8_t ch = 1;
+	HCD_HCTypeDef *hc = &hcd_handle.hc[ch];
+	USB_OTG_GlobalTypeDef *USBx = hcd_handle.Instance;
+	uint32_t USBx_BASE = (uint32_t)USBx;
+	HAL_StatusTypeDef ret;
+
+	if (hcd_handle.State != HAL_HCD_STATE_READY &&
+	    hcd_handle.State != HAL_HCD_STATE_BUSY) {
+		printf("rawtest: hcd not ready (state=%d)\n", hcd_handle.State);
+		return -EAGAIN;
+	}
+
+	uint32_t hprt = *(__IO uint32_t *)((uintptr_t)USBx + USB_OTG_HOST_PORT_BASE);
+
+	printf("rawtest: start (HPRT=0x%08lx)\n", (unsigned long)hprt);
+
+	hc->dev_addr = 0;
+	hc->ch_num = ch;
+	hc->ep_num = 0;
+	hc->ep_is_in = 0; /* SETUP stage is always OUT */
+	hc->speed = (uint8_t)USB_GetHostSpeed(USBx);
+	hc->do_ping = 0;
+	hc->do_ssplit = 0;
+	hc->do_csplit = 0;
+	hc->ep_type = EP_TYPE_CTRL;
+	hc->max_packet = 64;
+	hc->data_pid = HC_PID_SETUP;
+	hc->xfer_buff = setup_pkt;
+	hc->xfer_len = sizeof(setup_pkt);
+	hc->toggle_in = 0;
+	hc->toggle_out = 0;
+
+	ret = USB_HC_Init(USBx, ch, 0, 0, hc->speed, EP_TYPE_CTRL, 64);
+	printf("rawtest: USB_HC_Init -> %d HCCHAR=0x%08lx HCINTMSK=0x%08lx\n",
+	       ret, (unsigned long)USBx_HC(ch)->HCCHAR,
+	       (unsigned long)USBx_HC(ch)->HCINTMSK);
+	if (ret != HAL_OK) {
+		return -EIO;
+	}
+
+	printf("rawtest: before StartXfer HCCHAR=0x%08lx HCTSIZ=0x%08lx "
+	       "HCINT=0x%08lx GINTSTS=0x%08lx\n",
+	       (unsigned long)USBx_HC(ch)->HCCHAR,
+	       (unsigned long)USBx_HC(ch)->HCTSIZ,
+	       (unsigned long)USBx_HC(ch)->HCINT,
+	       (unsigned long)USBx->GINTSTS);
+
+	ret = USB_HC_StartXfer(USBx, hc, 0 /* no DMA */);
+	printf("rawtest: USB_HC_StartXfer -> %d\n", ret);
+
+	/*
+	 * Disable the shared OTG_FS IRQ for the duration of the poll loop.
+	 * stm32_hcd_isr() -> HAL_HCD_IRQHandler() services ALL channels
+	 * (including channel 0, still being retried in the background by
+	 * ST's USBH middleware/poll thread) and contains its own NAK/retry
+	 * state machine that can silently re-arm/rewrite channel registers
+	 * out from under this "bare-metal" test. Disabling the IRQ here
+	 * means any register change we observe below is a raw hardware
+	 * transition, not a side effect of HAL's own software retry logic.
+	 */
+	irq_disable(STM32_HCD_IRQ);
+
+	for (int i = 0; i < 100; i++) {
+		uint32_t hcint = USBx_HC(ch)->HCINT;
+		uint32_t hcchar = USBx_HC(ch)->HCCHAR;
+		uint32_t hctsiz = USBx_HC(ch)->HCTSIZ;
+
+		printf("rawtest: poll[%02d] HCINT=0x%08lx HCCHAR=0x%08lx "
+		       "HCTSIZ=0x%08lx GINTSTS=0x%08lx\n",
+		       i, (unsigned long)hcint, (unsigned long)hcchar,
+		       (unsigned long)hctsiz, (unsigned long)USBx->GINTSTS);
+
+		if (hcint != 0U) {
+			printf("rawtest: HCINT went non-zero after %d polls, stopping\n", i);
+			break;
+		}
+		k_msleep(2);
+	}
+
+	irq_enable(STM32_HCD_IRQ);
+	printf("rawtest: done\n");
+	return 0;
+}

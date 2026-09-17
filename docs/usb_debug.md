@@ -1795,3 +1795,143 @@ static configuration is clean.
 The temporary diagnostic printf's added to `stm32_hcd_adapter.c` for
 this comparison are being left in place (low-noise, one-line-per-boot,
 useful for any future re-diff) rather than reverted.
+
+## Step 30 — Plan item 2 abandoned (tooling), plan item 3 finds channel stuck in a halt-requested-but-never-completes state
+
+### Plan item 2: live SWD single-step — abandoned, tooling-broken
+
+Attempted live register/step debugging via `pyocd` + `arm-zephyr-eabi-gdb`
+to watch `HAL_HCD_HC_SubmitRequest()` execute in real time.
+
+- Generic `pyocd` target `stm32h743xx` (single-core M7-only CMSIS
+  pack) misidentifies the H755's actual Cortex-M4 core as "core 0",
+  never finding the M7 at all — wrong dual-core topology.
+- Installed the correct part-specific pack:
+  `pyocd pack install STM32H755ZITx` (`Keil.STM32H7xx_DFP` 4.1.3).
+  With `stm32h755zitx` as target and `-M under-reset`, the M7 core's
+  ROM table/ETM is now found correctly (`AHB-AP#0`).
+- But reading the M7's own System Control Space immediately faults:
+  `Error attempting to create component SCS: Memory transfer fault
+  (read) @ 0xe000ed78-0xe000ed7b`. GDB RSP register queries (`r7`,
+  `xpsr`) then fail with `'register %s not available in this CPU'`.
+  Reproduced identically via `pyocd commander` directly (bypassing
+  GDB's RSP layer), confirming this is a pyocd/CMSIS-pack core-model
+  bug for this exact dual-core topology, not a GDB protocol issue.
+
+**Conclusion: item 2 is not viable with current tooling on this board.**
+Would need a different tool (e.g. OpenOCD with a real H745/H755
+dual-core config, or ST-LINK-native debugger) to attempt this avenue
+again. Not pursued further for now — moved to item 3.
+
+### Plan item 3: bare-metal raw channel test, bypassing ST's USBH middleware
+
+Added `stm32_hcd_adapter_raw_control_test()` (new
+`usbhost rawtest` shell command): builds a hand-crafted 8-byte
+`GET_DESCRIPTOR(DEVICE)` SETUP packet and drives it directly through
+HAL's low-level primitives (`USB_HC_Init()` / `USB_HC_StartXfer()`) on
+**host channel 1** — deliberately *not* channel 0, which ST's USBH
+middleware's own control pipe already owns and continuously retries via
+its background poll thread. Then polls `HCINT`/`HCCHAR`/`HCTSIZ`/
+`GINTSTS` every 2 ms for 100 iterations (~200 ms), fully bypassing
+`USBH_Process()` and any of ST's stack/state-machine logic.
+
+**Run 1 (shared IRQ left enabled):** channel-1 registers were static for
+~38 polls (~76 ms), then *changed on their own* around poll 38–39 with
+zero corresponding code of mine touching channel 1. Root cause: the
+single shared `STM32_HCD_IRQ` (OTG_FS global interrupt) services *all*
+channels, including channel 0's ongoing middleware retries — so
+`HAL_HCD_IRQHandler()` was reacting to global/channel-independent
+interrupt sources and touching channel 1's state as a side effect,
+contaminating the "bare-metal" measurement.
+
+**Fix:** bracket the poll loop with `irq_disable(STM32_HCD_IRQ)` right
+after `USB_HC_StartXfer()` and `irq_enable(STM32_HCD_IRQ)` at the end,
+so any register change observed is purely hardware, not software/ISR
+side effects.
+
+**Run 2 (IRQ disabled around the poll loop) — the key result:**
+
+- `HCINT` (channel 1's own interrupt-status register) stayed
+  **`0x00000000` for the entire ~200 ms window** — no `XFRC`
+  (transfer complete), no `NAK`, no `STALL`, no `TXERR`, no `CHH`
+  (channel halted) — nothing, ever.
+- `HCCHAR` read `0xc0100040` from poll 0 onward and never changed.
+  Decoded: bit31 `CHENA`=1 **and** bit30 `CHDIS`=1 **simultaneously**.
+  `USB_HC_StartXfer()`'s own code explicitly does
+  `tmpreg &= ~USB_OTG_HCCHAR_CHDIS; tmpreg |= USB_OTG_HCCHAR_CHENA;`
+  right before writing `HCCHAR` — i.e. **HAL itself always clears
+  CHDIS and only ever sets CHENA**. It never sets `CHDIS`. So `CHDIS=1`
+  being visible at poll 0 (with IRQ disabled immediately after
+  `USB_HC_StartXfer()` returns, before any of my code could touch the
+  register) means something *else* set that bit in the handful of
+  microseconds between the HAL's write and my `irq_disable()` call —
+  almost certainly the shared ISR itself, reacting near-instantly to
+  some condition on channel 1 (e.g. attempting `USB_HC_Halt()`, which
+  sets `CHDIS=1` to request a halt) before I could disable it. This
+  also retroactively explains run 1's initial "quiet" polls: the ISR
+  had *already* eaten the evidence (by processing whatever fired) even
+  before my very first printf.
+- Crucially, once `CHDIS=1` is requested, DWC-OTG-family cores are
+  expected to complete the in-flight/pending packet (or immediately, if
+  nothing is in flight) and then raise a **channel-halted (`CHH`)
+  interrupt in `HCINT`**, at which point hardware also clears `CHENA`.
+  **None of that happened.** `HCENA` stayed set and `HCINT` stayed
+  `0x00000000` for the full 200 ms — the halt request was never
+  honored/completed by hardware.
+- `HCTSIZ` also never changed (`0x60080008`: `XFRSIZ=8`, `PKTCNT=1`,
+  `DPID=SETUP`) — consistent with the transfer descriptor state never
+  advancing, i.e. no data ever actually moved.
+- `GINTSTS` ticked once, early (~poll 3), from `0x04000021` to
+  `0x05000029` and then stayed fixed. Decoded bit diff: bit3 (`SOF`)
+  and bit24 (`HPRTINT`, host port interrupt) newly set. So the core's
+  frame/SOF timer is alive and a **host port status event** fired once
+  — but bit25 (`HCINT`, aggregate host-channels-interrupt) never set,
+  confirming channel 1 itself never posted a channel-level interrupt
+  to the core, matching the per-channel `HCINT` register reading zero
+  throughout.
+
+### Interpretation
+
+This is the clearest signal so far: channel 1 gets armed
+(`CHENA=1`), something (the shared ISR, reacting within microseconds)
+requests it be halted (`CHDIS=1`), and then the **hardware never
+finishes that halt** — no completion interrupt, no NAK, no STALL, no
+error, ever, for 200 ms straight. This looks less like "the SETUP
+packet was rejected/NAK'd on the bus" and more like **the host channel
+state machine itself getting stuck** — armed but never actually
+progressing the transaction onto the bus, and not responding to its own
+halt request either. This is consistent with (but does not yet prove)
+a core-level Host-mode lockup specific to channel/transaction dispatch,
+separate from configuration (item 1 already cleared) and separate from
+ID/VBUS/pinmux (cleared in earlier steps).
+
+### Gap found while attempting plan item 4 (errata re-review)
+
+`docs/es0596-stm32h7rxx7sxx-device-errata-stmicroelectronics.md`,
+the only errata sheet currently checked into `docs/`, is **for the
+STM32H7R/H7S family** (RM0477-based, single different die) — **not**
+for the STM32H745/H755/H747/H757 dual-core family this board actually
+uses. No H745/H755-specific errata sheet (the real one is ST's
+ES0392-equivalent for the dual-core H7 line) is present in this repo.
+Any earlier errata-based reasoning in this log sourced from that file
+should be treated as **not authoritative for this chip** until the
+correct errata sheet is obtained and cross-checked. Fetching it was
+attempted this session but timed out; obtaining and converting the
+correct dual-core H745/755/747/757 errata sheet is now a prerequisite
+for a meaningful plan item 4 and is carried forward as an open task.
+
+### Next steps
+
+1. Add `HPRT` (host port status) to the per-poll dump in a follow-up
+   run, to see whether the port silently drops "enabled" status during
+   the stuck window (would explain a permanently-stuck halt: core
+   thinks the port/device is gone and can't complete a halt against a
+   port it no longer considers active).
+2. Add `HFNUM` (frame number) to the per-poll dump to confirm the
+   frame counter is advancing normally during the stall (already
+   implied by the one-time `SOF` bit in `GINTSTS`, but not confirmed
+   continuously).
+3. Obtain the correct STM32H745/H755/H747/H757 errata sheet and
+   re-check for any known Host-mode channel-halt/lockup erratum before
+   concluding this is a design-level bug vs. a documented silicon
+   limitation with a known workaround.

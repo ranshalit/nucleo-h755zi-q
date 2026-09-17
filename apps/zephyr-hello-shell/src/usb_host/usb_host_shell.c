@@ -271,6 +271,17 @@ static int cmd_usbhost_arm(const struct shell *shell, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_usbhost_rawtest(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(shell,
+		    "running bare-metal HAL HC_Init/StartXfer control test "
+		    "(bypasses USBH middleware); watch console for 'rawtest:' lines");
+	return stm32_hcd_adapter_raw_control_test();
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(status, NULL, "Show ST USB host state", cmd_usbhost_status),
 	SHELL_CMD(descriptor, NULL, "Show enumerated device descriptor",
@@ -281,6 +292,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(arm, NULL,
 		  "Arm a capture synchronized to the next SETUP submission",
 		  cmd_usbhost_arm),
+	SHELL_CMD(rawtest, NULL,
+		  "Bare-metal HAL-only control transfer test, bypassing USBH middleware",
+		  cmd_usbhost_rawtest),
 	SHELL_SUBCMD_SET_END
 );
 
