@@ -3104,3 +3104,31 @@ layer — rather than the Zephyr environment in general.
   allocation) against `usb_dc_stm32.c`'s equivalent device-mode FIFO
   setup, since the device-mode path is proven working on this silicon
   under Zephyr.
+
+## Step 42: Reconfirmed Device-mode CDC-ACM success live, on demand
+
+User connected CN13 to this PC and asked to re-check. Reflashed the
+existing Step 26 CDC-ACM device-mode build
+(`/tmp/stm32h7-zephyr-cdc-acm`, unmodified since 2026-09-16) live:
+
+```
+$ lsusb
+Bus 003 Device 064: ID 2fe3:0001 NordicSemiconductor Zephyr CDC ACM sample
+```
+
+Bulk data path re-verified too:
+
+```python
+s = serial.Serial('/dev/ttyACM1', 115200, timeout=2)
+s.write(b'Hello USB!\r\n')
+# => b'Hello USB!\r\n'
+```
+
+Full enumeration + echo reproduced exactly as Step 26. Re-flashed
+the normal Host-mode `apps/zephyr-hello-shell` build immediately
+after to restore the board to its default debugging state.
+
+- Reconfirms Step 26/41: Device-mode path on this exact board/
+  connector/silicon is still 100% solid on demand, days later.
+  Nothing has regressed on that side. The bug remains isolated to
+  the Host-mode (HCD) path.
