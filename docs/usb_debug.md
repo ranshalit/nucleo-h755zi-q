@@ -3017,3 +3017,49 @@ Not attempted further without explicit sign-off given the scope.
   flipping a switch.
 - Still not tried: oscilloscope/DMM on D+/D-/VBUS; different USB
   device on CN13.
+
+## Step 40: Clarified "hardware TXERR" wording + ruled out cache/MPU
+
+User pushed back on Step 39 summary phrasing ("real root cause still
+same: genuine hardware TXERR") — correctly pointed out this reads as
+"hardware is broken," which contradicts Steps 1-38 where the
+bare-metal super-loop harness enumerates successfully on the *same*
+silicon/HAL. Correction: `TXERR`/"device not responding" is a
+symptom reported by the DWC2 core (the device missed the host's
+response-time window on the wire) — it is not proof the hardware
+itself is faulty. Something Zephyr's environment does (still
+unidentified) causes that miss; bare-metal's tight interrupt-free
+super-loop does not trigger it.
+
+Checked one more candidate differentiator this step: cache/MPU
+configuration.
+
+- Confirmed `soc/st/stm32/stm32h7x/soc_m7.c: soc_early_init_hook()`
+  unconditionally calls `sys_cache_instr_enable()` +
+  `sys_cache_data_enable()` at boot — Zephyr enables I/D-cache same
+  as the bare-metal harness's `CPU_CACHE_Enable()`.
+- Confirmed both bare-metal and Zephyr HCD init set
+  `Init.dma_enable = DISABLE` (slave/FIFO mode) — no DMA-vs-cache
+  coherency issue possible on either side, since the CPU pushes SETUP/
+  data bytes straight into the OTG core's TxFIFO register, not
+  through cached AHB SRAM.
+- Bare-metal's MPU_Config is a generic whole-address-space background
+  region (copied ST boilerplate), not a USB-buffer-specific
+  carve-out — no meaningful MPU difference identified vs. Zephyr's
+  default MPU map either.
+
+### Conclusion
+
+Cache/MPU config ruled out as the differentiator. The real
+differentiator remains Zephyr's runtime environment (scheduler,
+background threads, NVIC-driven concurrent activity) vs. bare-metal's
+interrupt-free tight loop — already evidenced by the phase-shift
+jitter behavior documented in earlier steps — not yet pinned to one
+specific mechanism (exact IRQ/thread that delays the response past
+the device's timeout window is still unknown).
+
+- Ruled out this step: cache enable state, MPU region config, DMA
+  mode as differentiators.
+- Wording correction: replace "hardware TXERR" framing going forward
+  with "hardware-reported transaction-timeout symptom, root cause
+  still Zephyr-environment-side."
