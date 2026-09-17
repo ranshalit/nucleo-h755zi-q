@@ -2535,3 +2535,107 @@ remains an open, untested hypothesis for a future session.
   instrumentation in the scratch bare-metal reference
   (`/tmp/usbh_bare_test/main.c`, not in git). No production-path logic
   was changed.
+
+## Step 35 — CORRECTION: the "SOF is dead" conclusion in Step 34 was a self-inflicted measurement artifact (ISR racing our own poll), not a real hardware bug
+
+Continuing from Step 34, ran two more targeted A/B experiments before
+accepting the SOF-dead theory as final:
+
+1. **Ethernet AHB-clock-gating test**: gated off
+   `RCC->AHB1ENR.{ETH1MACEN,ETH1TXEN,ETH1RXEN}` for the duration of the
+   `GINTSTS.SOF`-reassert probe, then restored them. Result: still 0
+   reasserts in ~5ms with Ethernet clocks off. **Falsifies AHB bus
+   contention from the Ethernet MAC as the cause.**
+2. **CM4 auto-boot test**: discovered via a new `FLASH->OPTSR_CUR`
+   read that this board's **BCM4 option byte is set (`BCM4=1`)** — the
+   second Cortex-M4 core auto-boots at every reset — and its flash
+   bank at `0x08100000` contains a real (non-erased) firmware image
+   (valid vector table, likely left over from an earlier session's
+   `nucleo_h755zi_q/stm32h755xx/m4` experiment per this repo's own
+   documented dual-core target support). Temporarily programmed
+   `BCM4=0` via `STM32_Programmer_CLI -ob BCM4=0`, hard-reset, and
+   re-ran the probe: **still 0 SOF reasserts in ~5ms with CM4 held in
+   reset.** Falsifies CM4/dual-core contention as the cause.
+   **Restored `BCM4=1`** afterward (this board's original
+   configuration; not the actual bug, so left as found).
+
+Both of these came back negative, which is when the real bug in *our
+own test methodology* was found:
+
+### The actual explanation: our own enabled ISR was clearing GINTSTS.SOF before our busy-poll loop could read it
+
+`stm32_hcd_adapter.c`'s production init path registers and enables the
+OTG_FS peripheral interrupt (`IRQ_CONNECT(STM32_HCD_IRQ, ...)` +
+`irq_enable(STM32_HCD_IRQ)`), and `GINTMSK.SOFM` is unmasked
+(confirmed: `GINTMSK=0xa3200018`, bit3 set). `HAL_HCD_IRQHandler()`
+services `GINTSTS.SOF` on every real SOF event and clears it in the
+ISR. Our `rawtest` diagnostic was a **plain busy-poll loop reading the
+same flag from ordinary (non-ISR) code** — if the hardware SOF event
+is real and the ISR is enabled, the ISR (higher priority, essentially
+zero latency) will always win the race and clear the flag before our
+polling loop's next read, making the flag look permanently clear from
+our vantage point *even though SOF is firing normally*. Bare-metal
+never registers/enables any NVIC IRQ for the OTG core at all (pure
+super-loop polling design), so nothing ever intercepted the flag
+there — which is exactly why bare-metal's identical probe legitimately
+saw 32 reasserts in 5ms and Zephyr's saw 0.
+
+**Confirming experiment**: added `irq_disable(STM32_HCD_IRQ)` right
+before the FRNUM/SOF diagnostic block in `rawtest`, ran the identical
+`GINTSTS.SOF`-reassert probe with the ISR now unable to steal the flag,
+then `irq_enable(STM32_HCD_IRQ)` again afterward. Result: **7-8
+reasserts in ~5ms** — consistent with a real, correctly-running ~1ms
+SOF cadence, once our own interrupt handler was no longer racing us
+for the same flag.
+
+### This retracts Step 34's headline conclusion
+
+The OTG core's SOF/frame-timer generation is **not** actually dead or
+misconfigured under Zephyr; the entire HFIR/FRNUM/SOF-dead narrative
+in Step 34 was chasing a self-inflicted artifact of testing a
+W1C interrupt flag from foreground code while an ISR for the same flag
+was concurrently enabled. The negative HFIR-override and
+`PCGCCTL`-is-clear findings from Step 34 remain valid observations
+(those registers really are configured as shown), they just don't
+mean what we thought they meant.
+
+One residual anomaly not yet explained: even with the ISR disabled and
+the direct `GINTSTS.SOF` flag confirmed to be reasserting normally
+(~7-8/5ms), the `HFNUM` low-16-bit `FRNUM` field sampled in the same
+diagnostic window (same IRQ-disabled interval) still read as static
+(`changed=0` across the 20×1ms sweep) while the upper 16-bit `FTREM`
+field visibly changed between samples. This inconsistency (SOF flag
+demonstrably toggling, but the frame-number counter it's supposed to
+be tied to appearing static in the *same* test run) has not been
+explained yet and needs a fresh look — possibly worth an independent,
+minimal repro (read `HFNUM` in a tight loop with no `k_msleep` at all,
+purely time-boxed via `k_busy_wait`/DWT cycles, matching the successful
+`GINTSTS.SOF` probe's polling style exactly) before drawing any further
+conclusions from `FRNUM` specifically.
+
+### Updated state of the investigation
+
+- The original user-facing symptom (USB camera on "USER USB"/CN13
+  never enumerates; `HCINT=0x80`/TXERR; zero D+/D- electrical
+  activity) is still unresolved.
+- Confirmed *not* the cause: static register misconfiguration (clock
+  tree, GPIO/pinmux, PWR, HFIR, PCGCCTL), reset timing, VBUS
+  capability, channel-0 collision, Ethernet/EMI or AHB-bus contention,
+  CM4/dual-core contention, and (as of this step) SOF/frame-timer
+  generation itself.
+- Still open: why the D+/D- lines never show any electrical activity
+  and `HCINT=0x80` (TXERR) results, given that the core's basic
+  clocking, port-enable state, and now-confirmed SOF generation all
+  look correct. The next productive angle is likely to look at what
+  happens electrically/logically in the brief window between
+  `USB_HC_StartXfer()` and the TXERR result specifically -- e.g.
+  whether the channel's `HCCHAR.CHENA` bit is actually latching
+  correctly relative to a real SOF boundary now that we know SOF truly
+  exists, or whether some other one-shot state (FIFO empty flags,
+  `HNPTXSTS`, per-channel `HCCHAR.ODDFRM` bit selection) differs
+  between the two environments.
+- All experiment code (Ethernet-gating test, CM4/BCM4 check,
+  IRQ-disable-during-probe) remains in `stm32_hcd_adapter.c`'s
+  `rawtest` path as additive diagnostics; no production-path logic was
+  changed. Board's `BCM4` option byte was restored to its
+  original (`1`, CM4 auto-boot enabled) state.

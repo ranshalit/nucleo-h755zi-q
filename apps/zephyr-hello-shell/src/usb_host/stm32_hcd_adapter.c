@@ -549,6 +549,22 @@ int stm32_hcd_adapter_raw_control_test(void)
 			       RCC_D2CCIP2R_USBSEL_Pos),
 	       (unsigned long)((RCC->AHB1ENR & RCC_AHB1ENR_USB2OTGHSEN) != 0));
 	{
+		/*
+		 * Disable the OTG_FS NVIC IRQ for the duration of this
+		 * diagnostic block. HAL_HCD_IRQHandler() (registered and
+		 * enabled at init) services GINTSTS.SOF whenever
+		 * GINTMSK.SOFM is set and clears it in the ISR -- if that's
+		 * happening, our own busy-poll reads below would always see
+		 * 0 (the ISR always wins the race), producing a false
+		 * "SOF is dead" conclusion even if SOF is really firing.
+		 * Disabling the IRQ here removes that ambiguity: any
+		 * remaining "0 reasserts" result after this point cannot be
+		 * explained by ISR interference.
+		 */
+		irq_disable(STM32_HCD_IRQ);
+		printf("rawtest: OTG_FS IRQ disabled for diagnostic window (was it stealing "
+		       "SOF flag before our poll could see it?)\n");
+
 		USB_OTG_HostTypeDef *host_regs =
 			(USB_OTG_HostTypeDef *)((uintptr_t)USBx + USB_OTG_HOST_BASE);
 		uint32_t hfnum_a = host_regs->HFNUM;
@@ -648,6 +664,55 @@ int stm32_hcd_adapter_raw_control_test(void)
 		}
 		printf("rawtest: SOF interrupt flag reasserted %d times in ~5ms busy-poll window\n",
 		       sof_count);
+
+		/*
+		 * Test whether the Ethernet MAC's AHB clock enables
+		 * (ETH1MACEN/ETH1TXEN/ETH1RXEN, bits 15-17 of AHB1ENR) are
+		 * starving the OTG core's frame timer via AHB bus/arbitration
+		 * contention -- the only significant extra AHB master this
+		 * app has that the bare-metal reference doesn't. Gate them
+		 * off, re-run the same SOF reassert-count probe, then
+		 * restore them (networking may glitch briefly but must not
+		 * be left disabled).
+		 */
+		uint32_t ahb1enr_saved = RCC->AHB1ENR;
+		uint32_t eth_mask = RCC_AHB1ENR_ETH1MACEN | RCC_AHB1ENR_ETH1TXEN |
+				    RCC_AHB1ENR_ETH1RXEN;
+
+		RCC->AHB1ENR = ahb1enr_saved & ~eth_mask;
+		__DSB();
+
+		greg->GINTSTS = USB_OTG_GINTSTS_SOF;
+		int sof_count_eth_off = 0;
+
+		for (int i = 0; i < 5000; i++) {
+			if (greg->GINTSTS & USB_OTG_GINTSTS_SOF) {
+				sof_count_eth_off++;
+				greg->GINTSTS = USB_OTG_GINTSTS_SOF;
+			}
+			k_busy_wait(1);
+		}
+		RCC->AHB1ENR = ahb1enr_saved;
+		__DSB();
+		printf("rawtest: with Ethernet AHB clocks (MAC/TX/RX) gated OFF: SOF interrupt "
+		       "flag reasserted %d times in ~5ms (Ethernet clocks restored after test)\n",
+		       sof_count_eth_off);
+
+		/*
+		 * Dual-core H745/H755 sanity check: if the CM4 core is
+		 * configured to auto-boot (FLASH option byte BCM4) and is
+		 * running some independent firmware, it could contend for
+		 * this shared USB_OTG_FS peripheral or its clock/reset
+		 * domain. Confirm it's NOT set (CM7-only boot) so this isn't
+		 * a silent dual-core conflict.
+		 */
+		printf("rawtest: FLASH->OPTSR_CUR=0x%08lx BCM4=%lu (1=CM4 auto-boots at reset, "
+		       "0=CM7-only)\n",
+		       (unsigned long)FLASH->OPTSR_CUR,
+		       (unsigned long)((FLASH->OPTSR_CUR & FLASH_OPTSR_BCM4) != 0));
+
+		irq_enable(STM32_HCD_IRQ);
+		printf("rawtest: OTG_FS IRQ re-enabled\n");
 	}
 	printf("rawtest: start (HPRT=0x%08lx)\n", (unsigned long)hprt);
 	printf("rawtest: clocks SYSCLK=%lu HCLK=%lu PCLK1=%lu PCLK2=%lu\n",
