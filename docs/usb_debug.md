@@ -3278,3 +3278,22 @@ class built on bulk or control transfers (MSC, CDC-ACM, HID, DFU, custom
 vendor bulk protocols) is safe to build on. Isochronous classes (UAC/UVC)
 and USB host mode remain blocked pending the still-unidentified DWC2/UDC
 periodic-transfer gap.
+
+## Step 46: Combined demo — MSC + UART shell + Ethernet + HTTP server
+
+Merged the working USB MSC demo (Step 45) with `apps/zephyr-hello-shell`'s
+UART shell, LED control, Ethernet, and HTTP dashboard server, dropping only
+that app's still-broken custom bare-metal USB host stack. Renamed the MSC
+init code to `usb_msc.c`/`board_usb_msc_start()` and called it from a
+combined `main.c` alongside `board_io_init()`, `board_blink_threads_start()`,
+and `board_http_server_start()`.
+
+Verified all four simultaneously on one flashed image:
+- USB MSC: enumerates as `2fe3:0009`, RAM disk mounts as `/dev/sdb`.
+- UART shell: `version` command over `/dev/ttyACM0` responds correctly.
+- Ethernet: `ping 192.168.55.2` from host succeeds.
+- HTTP server: `curl http://192.168.55.2/` returns the board I/O dashboard.
+
+`apps/zephyr-msc-demo/` is now the full-featured board demo app going
+forward; `apps/zephyr-hello-shell` remains as-is for USB host-mode
+experiments only.

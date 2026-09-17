@@ -2,8 +2,13 @@
  * Copyright (c) 2026 Ran Shalit
  * SPDX-License-Identifier: Apache-2.0
  *
- * In-RAM disk backing store for the USB mass storage demo.
+ * In-RAM disk backing store for the USB mass storage demo, plus the
+ * Ethernet PHY tweak needed by board_http_server_start().
  */
+
+&eth_phy {
+	no-reset;
+};
 
 / {
 	ramdisk0 {
