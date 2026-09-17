@@ -44,6 +44,13 @@ static ssize_t camera_stream_send_all(int sock, const void *buf, size_t len)
 			return sent;
 		}
 
+		if (sent == 0) {
+			/* Peer stopped reading without an error; treat as
+			 * disconnect rather than spinning forever.
+			 */
+			return -ECONNRESET;
+		}
+
 		ptr += (size_t)sent;
 		len -= (size_t)sent;
 	}
@@ -140,6 +147,10 @@ static void camera_stream_thread_entry(void *p1, void *p2, void *p3)
 
 		if (client_sock < 0) {
 			LOG_ERR("Failed to accept stream client: %d", errno);
+			/* Avoid a tight retry loop on persistent accept
+			 * failures (e.g. resource exhaustion).
+			 */
+			k_sleep(K_MSEC(500));
 			continue;
 		}
 
