@@ -2790,3 +2790,99 @@ switch's fault threshold.
   `usbh_core.c`, `USBH_MAX_ERROR_COUNT` raised in `usbh_def.h`, and the
   new `usbhost regs` shell command plus `USBH_LL_OpenPipe()` debug
   print in `usb_host_shell.c`/`stm32_hcd_adapter.c`.
+
+## Step 37: comparing against ST's official STM32CubeH7 USB_Host examples — two more dead ends
+
+Directly compared our `stm32_hcd_adapter.c`/`usb_host_shell.c` against
+ST's own official reference USB_Host applications (STM32CubeH7 v1.13.0,
+`Projects/STM32H747I-DISCO/Applications/USB_Host` and
+`Projects/NUCLEO-H723ZG/Applications/USB_Host`, sparse-cloned to
+`/tmp/cubeh7_usbhost_ref`, scratch/not committed).
+
+Note: DISCO's example uses `USB_OTG_HS` with an external ULPI PHY
+(`HCD_PHY_ULPI`, `HS` speed) — not comparable to our OTG_FS embedded
+PHY. `NUCLEO-H723ZG`'s example, despite also naming its peripheral
+`USB_OTG_HS`, actually configures `HCD_PHY_EMBEDDED` + `HCD_SPEED_FULL`
+(the HS controller's built-in FS-only embedded PHY) — a much closer
+functional analog to our board and the one used for comparison below.
+
+### Hypothesis 1: `Sof_enable` — dead end (cosmetic only)
+
+Both reference examples set `hhcd.Init.Sof_enable = DISABLE`; our
+`stm32_hcd_adapter.c` had it `ENABLE`'d. Changed ours to `DISABLE` to
+match and reflashed/retested with the physical camera — **identical
+failure**, no change whatsoever.
+
+Root cause of no effect: `stm32h7xx_ll_usb.c`'s `USB_HostInit()` (host
+mode) unconditionally ORs in `GINTMSK_SOFM` regardless of
+`cfg.Sof_enable` — that config field only gates SOFM in the
+device-mode path (`USB_DevInit()`). Verified live via the `usbhost
+regs` shell command: `GINTMSK` bit 3 (SOFM) stayed set to 1 both
+before and after the config change. This means ST's own reference
+examples *also* get a live 1 kHz SOF interrupt in host mode identically
+to us — the config field is a no-op in host mode in this HAL version,
+so this was never a real behavioral difference. Reverted to `ENABLE`
+(matches our own `HAL_HCD_SOF_Callback()`/`USBH_LL_IncTimer()` usage
+which relies on real SOF events); left the finding documented in a
+comment in `stm32_hcd_adapter.c` so it isn't re-investigated.
+
+### Hypothesis 2: tight busy-loop `USBH_Process()` polling — dead end (and briefly regressive)
+
+ST's reference calls `MX_USB_HOST_Process()` -> `USBH_Process()` from
+a zero-delay bare-metal `while (1)` superloop; our
+`usb_host_poll_loop()` thread instead did `k_msleep(1)` between calls.
+Hypothesis: `k_msleep(1)` rounds up to a full kernel tick and
+introduces tick-aligned jitter, servicing the USBH state machine far
+less often/more irregularly than the reference's tight loop, possibly
+missing a NAK-retry or setup-phase timing window.
+
+Tried replacing `k_msleep(USB_HOST_POLL_PERIOD_MS)` with `k_yield()` to
+approximate the reference's tight loop. Rebuilt, reflashed: **serial
+console went completely silent** (board otherwise alive: HTTP API and
+LEDs kept responding/blinking normally). Root cause: `k_yield()` only
+cedes the CPU to threads at the *same or higher* priority; it never
+lets a lower-priority thread run. The USB poll thread runs at priority
+`USB_HOST_POLL_THREAD_PRIORITY` (7) while the shell backend thread runs
+at Zephyr's (lower, higher-numbered) default preemptive priority, so
+the busy-looping poll thread completely starved the shell thread of
+any CPU time. This is worse than a no-op: a real regression that would
+have silently broken the console.
+
+Reverted to `k_msleep(USB_HOST_POLL_PERIOD_MS)`, rebuilt, reflashed,
+confirmed console fully responsive again (all standard shell/LED/HTTP
+checks pass). Re-tested the **original symptom** (camera on CN13,
+`usbhost vbuscycle`) on this known-good build: **failure signature is
+byte-for-byte identical** to every prior test —
+`HCINT=0x00000000`, `HC_state=2`, `HCTSIZ=0x60080008`,
+`HCCHAR=0x20100040`/`0x00100040`, "Control error: Device not
+responding", repeating every reconnect cycle.
+
+### Net result
+
+Both hypotheses from the ST-reference diff are ruled out. Comments
+documenting *why* each is a dead end were left in
+`stm32_hcd_adapter.c` (Sof_enable) and `usb_host_shell.c` (poll-loop
+scheduling) so future debugging sessions don't waste time
+re-investigating either. The underlying root cause of the 100%
+control-transfer failure on CN13 remains unidentified.
+
+- Ruled out this step: `Sof_enable` config field (host-mode SOFM is
+  unconditionally forced on regardless of this setting — proven via
+  live register read), and `USBH_Process()` poll-loop granularity via
+  `k_yield()` (no behavioral difference found before console got
+  starved; reverted to `k_msleep(1)`, which the reference's tight loop
+  doesn't need since it isn't running under a preemptive scheduler
+  with other threads to share CPU with).
+- Still ruled out from before: everything listed in Step 36 and prior
+  (LED threads, Ethernet AHB clocks, FIFO staleness, HAINTMSK masking,
+  VBUS overcurrent, static register misconfig, SOF/frame-timer
+  generation itself).
+- Not yet tried: NVIC interrupt priority comparison (our
+  `IRQ_CONNECT(STM32_HCD_IRQ, STM32_HCD_IRQ_PRI=5, ...)` vs. the
+  reference's `HAL_NVIC_SetPriority(OTG_HS_IRQn, 6, 0)` — could still
+  matter if a higher/equal-priority Zephyr kernel interrupt is
+  preempting/delaying USB IRQ servicing at exactly the wrong moment);
+  full source diff of `Middlewares/ST/STM32_USB_Host_Library` core
+  state machine against our vendored `third_party/stm32-mw-usb-host`
+  beyond the previously-bumped `USBH_MAX_ERROR_COUNT`; oscilloscope/DMM
+  instrumentation (still unavailable).

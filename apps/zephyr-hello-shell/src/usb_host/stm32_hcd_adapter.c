@@ -158,6 +158,19 @@ static int adapter_init_hardware(void)
 	hcd_handle.Init.speed = HCD_SPEED_FULL;
 	hcd_handle.Init.dma_enable = DISABLE;
 	hcd_handle.Init.phy_itface = HCD_PHY_EMBEDDED;
+	/*
+	 * Confirmed (STM32H7 HAL, both this vendored copy and ST's own
+	 * reference USB Host examples use identical logic): in HOST mode,
+	 * USB_HostInit() unconditionally ORs in GINTMSK_SOFM regardless of
+	 * cfg.Sof_enable -- that config field only gates SOFM in DEVICE mode
+	 * (USB_DevInit()). So setting this DISABLE, like ST's own
+	 * NUCLEO-H723ZG/STM32H747I-DISCO USB_Host examples do, has *no*
+	 * effect on the actual SOFM interrupt enable in host mode (verified:
+	 * GINTMSK's SOFM bit stayed set either way, and disabling it here
+	 * did not change the enumeration failure). Left at ENABLE to match
+	 * this app's own HAL_HCD_SOF_Callback()/USBH_LL_IncTimer() usage,
+	 * which does need real SOF events to keep phost->Timer moving.
+	 */
 	hcd_handle.Init.Sof_enable = ENABLE;
 	hcd_handle.Init.low_power_enable = DISABLE;
 	hcd_handle.Init.vbus_sensing_enable = DISABLE;

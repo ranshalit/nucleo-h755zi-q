@@ -114,6 +114,21 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 				usb_host.gState = HOST_ABORT_STATE;
 			}
 		}
+		/*
+		 * Tried replacing this with k_yield() to mimic ST's
+		 * bare-metal reference (which busy-loops USBH_Process() with
+		 * zero delay) -- reverted. k_yield() only cedes the CPU to
+		 * other threads at the SAME OR HIGHER priority; it never lets
+		 * a strictly lower-priority thread run. This thread runs at
+		 * priority USB_HOST_POLL_THREAD_PRIORITY (7), while the shell
+		 * backend thread runs at Zephyr's default (much lower/higher-
+		 * numbered, i.e. lower priority) preemptive priority. Result:
+		 * this thread never yielded to the shell at all and the
+		 * console went completely silent (board stayed otherwise
+		 * alive -- HTTP/LEDs kept working) while it ran. k_msleep(1)
+		 * is the correct approach here; it actually blocks and lets
+		 * lower-priority threads run too.
+		 */
 		k_msleep(USB_HOST_POLL_PERIOD_MS);
 	}
 }
