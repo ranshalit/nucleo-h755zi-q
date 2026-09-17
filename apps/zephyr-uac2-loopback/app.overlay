@@ -1,0 +1,81 @@
+/*
+ * USB Audio Class 2 loopback topology: a single synchronous, fixed-rate
+ * 24 kHz mono clock feeding one input (host->device, "speaker") and one
+ * output (device->host, "microphone") terminal. main.c immediately bounces
+ * every buffer received on the speaker terminal back out on the microphone
+ * terminal, so whatever the host plays is what the host hears back.
+ *
+ * Modeled on samples/subsys/usb/audio/headset (legacy stack topology) but
+ * using the modern zephyr,uac2 devicetree/class API paired with udc_dwc2,
+ * since the legacy usb_dc_stm32.c driver never recovers from DWC2's
+ * "incomplete isochronous OUT" condition (see docs/usb_debug.md Step 44).
+ *
+ * Mono/24kHz was chosen (instead of the more obvious stereo/48kHz) because
+ * this board's udc_stm32.c driver hardcodes every non-EP0 OUT endpoint's
+ * capability to a fixed 64-byte max packet size (see EP_MPS in
+ * drivers/usb/udc/udc_stm32.c), regardless of endpoint type. A stereo
+ * 48 kHz OUT stream needs 192 bytes/ms and never fits; mono 24 kHz needs
+ * only 48 bytes/ms and assigns cleanly. The mic (IN) direction has no such
+ * cap, but is kept symmetric here for simplicity.
+ */
+
+#include <dt-bindings/usb/audio.h>
+
+&zephyr_udc0 {
+	uac2_loopback: usb_audio2 {
+		compatible = "zephyr,uac2";
+		status = "okay";
+		full-speed;
+		audio-function = <AUDIO_FUNCTION_HEADSET>;
+
+		uac_clock: clock {
+			compatible = "zephyr,uac2-clock-source";
+			clock-type = "internal-fixed";
+			sof-synchronized;
+			sampling-frequencies = <24000>;
+		};
+
+		speaker_in_terminal: speaker_in_terminal {
+			compatible = "zephyr,uac2-input-terminal";
+			clock-source = <&uac_clock>;
+			terminal-type = <USB_TERMINAL_STREAMING>;
+			front-left;
+		};
+
+		speaker_output: speaker {
+			compatible = "zephyr,uac2-output-terminal";
+			data-source = <&speaker_in_terminal>;
+			clock-source = <&uac_clock>;
+			terminal-type = <BIDIRECTIONAL_TERMINAL_HEADSET>;
+			assoc-terminal = <&mic_input>;
+		};
+
+		mic_input: microphone {
+			compatible = "zephyr,uac2-input-terminal";
+			clock-source = <&uac_clock>;
+			terminal-type = <BIDIRECTIONAL_TERMINAL_HEADSET>;
+			front-left;
+		};
+
+		mic_out_terminal: mic_out_terminal {
+			compatible = "zephyr,uac2-output-terminal";
+			data-source = <&mic_input>;
+			clock-source = <&uac_clock>;
+			terminal-type = <USB_TERMINAL_STREAMING>;
+		};
+
+		as_iso_out: speaker_interface {
+			compatible = "zephyr,uac2-audio-streaming";
+			linked-terminal = <&speaker_in_terminal>;
+			subslot-size = <2>;
+			bit-resolution = <16>;
+		};
+
+		as_iso_in: mic_interface {
+			compatible = "zephyr,uac2-audio-streaming";
+			linked-terminal = <&mic_out_terminal>;
+			subslot-size = <2>;
+			bit-resolution = <16>;
+		};
+	};
+};

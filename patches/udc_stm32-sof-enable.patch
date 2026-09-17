@@ -1,0 +1,21 @@
+diff --git a/drivers/usb/udc/udc_stm32.c b/drivers/usb/udc/udc_stm32.c
+index 67a937c8b15..88fbf37c579 100644
+--- a/drivers/usb/udc/udc_stm32.c
++++ b/drivers/usb/udc/udc_stm32.c
+@@ -1000,6 +1000,16 @@ static void priv_pcd_prepare(const struct device *dev)
+ 	priv->pcd.Init.dev_endpoints = cfg->num_endpoints;
+ 	priv->pcd.Init.ep0_mps = cfg->ep0_mps;
+ 	priv->pcd.Init.speed = UTIL_CAT(UDC_STM32_, DT_INST_STRING_UPPER_TOKEN(0, maximum_speed));
++	/*
++	 * Unlike every other UDC driver in this tree (dwc2, nrf, rpi_pico,
++	 * kinetis, ...), this driver never wired CONFIG_UDC_ENABLE_SOF to
++	 * anything, so ST HAL's SOF interrupt (GINTMSK.SOFM) was never
++	 * enabled regardless of the Kconfig setting. Isochronous classes
++	 * (e.g. usbd_uac2.c) rely on a periodic SOF event to re-arm OUT
++	 * transfers every frame; without it, an OUT endpoint receives at
++	 * most one packet and then silently stalls forever.
++	 */
++	priv->pcd.Init.Sof_enable = IS_ENABLED(CONFIG_UDC_ENABLE_SOF);
+ 
+ 	/* Per controller/Phy values */
+ #if defined(USB)

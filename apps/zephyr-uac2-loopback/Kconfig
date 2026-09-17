@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Vendored copy of the sample USB device options (see src/sample_usbd_init.c)
+# since this is a standalone app, not built inside vendor/zephyrproject/zephyr.
+
+config SAMPLE_USBD_MANUFACTURER
+	string "USB device manufacturer string"
+	default "Zephyr Project"
+
+config SAMPLE_USBD_PRODUCT
+	string "USB device product string"
+	default "USBD sample"
+
+config SAMPLE_USBD_PID
+	hex "USB device Product ID"
+	default 0x0001
+
+config SAMPLE_USBD_SELF_POWERED
+	bool "USB device Self-powered attribute"
+	default y
+
+config SAMPLE_USBD_REMOTE_WAKEUP
+	bool "USB device Remote Wakeup attribute"
+
+config SAMPLE_USBD_MAX_POWER
+	int "USB device bMaxPower value"
+	default 125
+	range 0 250
+
+config SAMPLE_USBD_20_EXTENSION_DESC
+	bool "Use default USB 2.0 Extension Descriptor"
+	depends on USBD_BOS_SUPPORT
+
+source "Kconfig.zephyr"

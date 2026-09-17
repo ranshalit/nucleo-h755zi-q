@@ -3162,3 +3162,86 @@ Board is now in Device mode, ready as a base for the next demo step
 (either extending this sample toward USB MSC file-transfer, or
 building an Ethernet-based MJPEG/UDP live-video streamer per the
 user's stated preference for Ethernet over USB for the "live" case).
+
+## Step 44: USB Audio (UAC2) loopback demo — new bugs found, data path still stalls
+
+Goal: play `~/Downloads/Valerie.mp3` from the host into the board and hear
+it looped back, as a device-mode audio demo.
+
+### Legacy stack (`samples/subsys/usb/audio/headset`) — real driver gap found
+
+Built/flashed Zephyr's stock UAC1 `headset` sample. It enumerated fine as an
+ALSA/PulseAudio sound card, but audio payload never arrived: UART logs
+confirmed `HAL_PCD_DataOutStageCallback` never fired. Root cause: the legacy
+`usb_dc_stm32.c` never implements `HAL_PCD_ISOOUTIncompleteCallback`, so
+DWC2's normal `INCOMPISOOUT` condition permanently stalls the OUT endpoint
+with no recovery path. This is a genuine gap in Zephyr's legacy STM32 USB
+device driver — not board/hardware specific.
+
+### Custom app on the modern stack (`apps/zephyr-uac2-loopback/`)
+
+Since the newer `drivers/usb/udc/udc_dwc2.c` + `subsys/usb/device_next/class/usbd_uac2.c`
+combo does handle `INCOMPISOOUT` recovery, wrote a standalone loopback app on
+that stack (no stock sample fit — the two upstream UAC2 samples require
+nRF5340 I2S hardware). Two real, confirmed bugs were found and fixed along
+the way:
+
+1. **`udc_stm32.c` hardcodes a 64-byte MPS cap on every non-EP0 OUT
+   endpoint**, regardless of its actual USB type, rejecting any UAC2
+   descriptor needing more (stereo/48kHz needs 192 bytes/ms). Worked around
+   by using mono/24kHz (48 bytes/ms) instead of stereo/48kHz.
+2. **`udc_stm32.c` never wired `CONFIG_UDC_ENABLE_SOF` to the ST HAL.**
+   Every other in-tree UDC driver (dwc2, nrf, rpi_pico, kinetis, ambiq,
+   numaker, it82xx2) does `IF_ENABLED(CONFIG_UDC_ENABLE_SOF, ...)` against
+   its hardware SOF-interrupt-enable bit; `udc_stm32.c` `memset()`s
+   `hpcd.Init` to zero and never sets `Init.Sof_enable`, so ST HAL's
+   `USBx->GINTMSK |= USB_OTG_GINTMSK_SOFM` (gated on `cfg.Sof_enable != 0`)
+   was **never** enabled at the hardware level no matter what the Kconfig
+   said. Fixed directly in the vendored driver:
+   `priv->pcd.Init.Sof_enable = IS_ENABLED(CONFIG_UDC_ENABLE_SOF);`
+   in `udc_stm32_init()`. This is a real upstream-worthy fix.
+
+Both fixes are real and correct, and after applying them the speaker
+terminal's enable/disable state machine behaves correctly — it enables
+once and **stays enabled** for the whole host-side playback session
+(previously it may have toggled). This proves enumeration/negotiation is
+fully healthy.
+
+### Data still never arrives — confirmed, not a logging artifact
+
+Despite both fixes, `data_recv_cb` in the app never fires — confirmed
+three independent ways:
+- Instrumented `recv_count`/`sent_count` counters, including an
+  unconditional first-hit log line (not just every-200), never printed.
+- `CONFIG_UDC_DRIVER_LOG_LEVEL_DBG=y` shows exactly **one** `udc_stm32_rx:
+  RX ep 0x01` arm (at interface-alt-setting-enable time) and no
+  `HAL_PCD_DataOutStageCallback`-driven `handle_msg_data_out: DataOut ep
+  0x01` line ever, across a full ~15s playback window.
+- Ruled out log-buffer drops as a false negative: switching to
+  `CONFIG_LOG_MODE_IMMEDIATE=y` crashed the board (MPU fault / stack
+  overflow, unrelated pre-existing fragility in that path) — reverted to
+  deferred logging with `CONFIG_LOG_BUFFER_SIZE=8192`, which showed zero
+  dropped messages during the actual playback window (drops only occurred
+  during the noisy boot/enumeration burst, which doesn't matter here).
+  `/tmp/valerie_recorded.raw` stayed 0 bytes across every run.
+
+### Working hypothesis: shares root cause with the earlier USB Host failure
+
+The user noted this "sounds similar to the usb host issue" from earlier in
+this investigation (Steps 1-39): there too, enumeration/control transfers
+succeeded but a class of periodic/high-throughput data transfer over this
+same DWC2 silicon silently failed under Zephyr, while bare-metal HAL and
+Zephyr's own bulk-based CDC-ACM device-mode transfers both work fine on
+identical hardware. The pattern in both cases is "control-plane succeeds
+completely, data-plane for isochronous/periodic transfers is silently
+lost," strongly suggesting a shared, still-unidentified gap in how Zephyr's
+STM32 DWC2 glue (both `udc_stm32.c` for device mode and the host-side HCD
+adapter code) configures periodic/isochronous transfer state versus what
+ST's own HAL does — not something fixable by further class-driver-level
+patching. This remains the leading theory and is unresolved.
+
+Current state: `apps/zephyr-uac2-loopback/` builds and enumerates
+correctly with both real bugs fixed, but the loopback demo does not
+audibly work. The two driver fixes (MPS-cap workaround via mono/24kHz
+config, and the `Sof_enable` wiring in `udc_stm32.c`) are kept as genuine
+improvements regardless of the demo's outcome.
