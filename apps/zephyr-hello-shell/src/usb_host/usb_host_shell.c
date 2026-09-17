@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
@@ -107,6 +108,20 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 
 	while (true) {
 		if (!atomic_get(&usb_host_poll_paused)) {
+			/*
+			 * Step 38: in poll mode, service the OTG_FS controller
+			 * synchronously right before USBH_Process() instead of
+			 * relying on the (now-disabled) async NVIC ISR. This
+			 * makes HAL_HCD_IRQHandler() -> USBH_LL_*() callback
+			 * dispatch happen deterministically back-to-back with
+			 * the USBH state-machine step, in the same thread, on
+			 * every loop iteration -- eliminating any possibility
+			 * of the ISR preempting USBH_Process() (or vice versa)
+			 * mid-state-transition, which bare-metal's superloop
+			 * never has to worry about since it never enables this
+			 * IRQ in the first place.
+			 */
+			stm32_hcd_adapter_poll_service();
 			(void)USBH_Process(&usb_host);
 			if (usb_host.gState == HOST_CHECK_CLASS &&
 			    usb_host.ClassNumber == 0U) {
@@ -355,6 +370,28 @@ static int cmd_usbhost_resume(const struct shell *shell, size_t argc, char **arg
 	return 0;
 }
 
+static int cmd_usbhost_pollmode(const struct shell *shell, size_t argc, char **argv)
+{
+	if (argc < 2) {
+		shell_print(shell, "poll mode: %s",
+			    stm32_hcd_adapter_get_poll_mode() ? "on" : "off");
+		return 0;
+	}
+
+	if (strcmp(argv[1], "on") == 0) {
+		stm32_hcd_adapter_set_poll_mode(true);
+	} else if (strcmp(argv[1], "off") == 0) {
+		stm32_hcd_adapter_set_poll_mode(false);
+	} else {
+		shell_print(shell, "usage: usbhost pollmode [on|off]");
+		return -EINVAL;
+	}
+
+	shell_print(shell, "poll mode: %s",
+		    stm32_hcd_adapter_get_poll_mode() ? "on" : "off");
+	return 0;
+}
+
 static int cmd_usbhost_vbuscycle(const struct shell *shell, size_t argc, char **argv)
 {
 	uint32_t hold_ms = 2000;
@@ -483,6 +520,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(regs, NULL,
 		  "Dump live GINTMSK/HAINT/HAINTMSK interrupt-enable registers",
 		  cmd_usbhost_regs),
+	SHELL_CMD(pollmode, NULL,
+		  "Toggle bare-metal-style synchronous IRQ polling (usbhost pollmode [on|off])",
+		  cmd_usbhost_pollmode),
 	SHELL_SUBCMD_SET_END
 );
 

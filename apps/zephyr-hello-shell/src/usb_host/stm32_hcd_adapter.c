@@ -24,6 +24,7 @@
 #define STM32_HCD_IRQ_PRI 5
 
 static HCD_HandleTypeDef hcd_handle;
+static bool hcd_poll_mode;
 
 void HAL_HCD_Connect_Callback(HCD_HandleTypeDef *hhcd)
 {
@@ -975,4 +976,48 @@ int stm32_hcd_adapter_raw_control_test(void)
 	irq_enable(STM32_HCD_IRQ);
 	printf("rawtest: done\n");
 	return 0;
+}
+
+/*
+ * usb_debug.md Step 38: bare-metal-style synchronous polling mode. When
+ * enabled, the OTG_FS NVIC IRQ is permanently disabled and the caller
+ * (usb_host_shell.c's poll thread) must call stm32_hcd_adapter_poll_service()
+ * on every loop iteration instead of relying on stm32_hcd_isr() firing
+ * asynchronously. HAL_HCD_IRQHandler() itself is identical either way --
+ * it reads GINTSTS/HAINT and dispatches to the same callbacks
+ * (HAL_HCD_Connect_Callback, HAL_HCD_SOF_Callback, etc.) that drive
+ * USBH_LL_*() -- only *how* it gets invoked changes: asynchronously
+ * pre-empting whatever else is running (production default), vs.
+ * synchronously back-to-back with USBH_Process() in the same thread,
+ * exactly like ST's bare-metal reference's superloop.
+ */
+void stm32_hcd_adapter_set_poll_mode(bool enable)
+{
+	if (enable == hcd_poll_mode) {
+		return;
+	}
+
+	hcd_poll_mode = enable;
+
+	if (enable) {
+		irq_disable(STM32_HCD_IRQ);
+		printf("usbhost: poll mode ENABLED (OTG_FS IRQ disabled; call "
+		       "stm32_hcd_adapter_poll_service() to service it)\n");
+	} else {
+		irq_enable(STM32_HCD_IRQ);
+		printf("usbhost: poll mode DISABLED (OTG_FS IRQ re-enabled; back to "
+		       "normal async interrupt-driven servicing)\n");
+	}
+}
+
+bool stm32_hcd_adapter_get_poll_mode(void)
+{
+	return hcd_poll_mode;
+}
+
+void stm32_hcd_adapter_poll_service(void)
+{
+	if (hcd_poll_mode) {
+		HAL_HCD_IRQHandler(&hcd_handle);
+	}
 }

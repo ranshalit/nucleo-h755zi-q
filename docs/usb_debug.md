@@ -2886,3 +2886,82 @@ control-transfer failure on CN13 remains unidentified.
   state machine against our vendored `third_party/stm32-mw-usb-host`
   beyond the previously-bumped `USBH_MAX_ERROR_COUNT`; oscilloscope/DMM
   instrumentation (still unavailable).
+
+## Step 38: user-requested experiment — run Zephyr's HCD servicing in the same synchronous-polling style as bare-metal
+
+User directly asked whether Zephyr's USB host code could be changed to
+service the OTG_FS controller the same way the working bare-metal
+reference does: bare-metal never enables the OTG_FS NVIC interrupt at
+all — it is a pure super-loop that (implicitly, via `HAL_HCD_...()`
+polling helpers) reads/dispatches controller events synchronously,
+with no ISR ever preempting anything.
+
+### What was implemented
+
+Added a runtime-toggleable "poll mode" to `stm32_hcd_adapter.c`/`.h`
+and `usb_host_shell.c`:
+
+- `stm32_hcd_adapter_set_poll_mode(bool)` / `_get_poll_mode()`: when
+  enabled, permanently `irq_disable(STM32_HCD_IRQ)`s the OTG_FS NVIC
+  line (this is a **per-peripheral** IRQ disable, not a global
+  interrupt lock — UART/console and Ethernet have their own separate
+  NVIC lines and are completely unaffected).
+- `stm32_hcd_adapter_poll_service()`: calls `HAL_HCD_IRQHandler(&hcd_handle)`
+  directly. This is the *same* handler function the ISR would have
+  called — only *how* it gets invoked changes (synchronously, back to
+  back with `USBH_Process()`, in the same thread) instead of
+  asynchronously pre-empting other code.
+- `usb_host_poll_loop()` (in `usb_host_shell.c`) now calls
+  `stm32_hcd_adapter_poll_service()` immediately before
+  `USBH_Process()` on every iteration, when poll mode is active.
+- New shell command: `usbhost pollmode [on|off]`.
+
+### Test result (with the physical camera on CN13)
+
+`usbhost pollmode on` + `usbhost vbuscycle`: **enumeration still
+fails**, same overall "unrecovered error" / "Control error: Device not
+responding" outcome as async/interrupt-driven mode.
+
+However, the **observed HCINT signature changed**: in normal
+(interrupt-driven) mode, `HCINT` was seen stuck at `0x00000000` the
+entire time (i.e. the channel appeared to never receive any hardware
+event at all before hanging). In poll mode, `HCINT` now reads
+`0x00000002` (bit 1 = `CHH`, Channel Halted) at the point the
+middleware samples it. Tracing `stm32h7xx_hal_hcd.c`'s `CHH` handling:
+a channel reaching `HC_HALTED` after `HC_XACTERR`/`HC_DATATGLERR` (i.e.
+after a genuine hardware `TXERR`/transaction-error event) increments
+`ErrCnt`; after `ErrCnt > 2` it sets `urb_state = URB_ERROR`, which is
+exactly the "unrecovered error"/"Device not responding" path the
+middleware reports. This means the *real* underlying event is a
+`TXERR` (transaction error — the device did not respond to the
+transaction inside the bus timeout window) happening repeatedly (3+
+times), with our debug printf only sampling the residual `CHH` bit
+after the driver has already cleared/processed `TXERR` internally.
+This is consistent with, and does not contradict, every prior
+finding in this investigation: the device genuinely is not answering
+the host's transaction in time, under both async and now synchronous
+polling. Switching to synchronous polling changed what got sampled/
+printed but not the underlying hardware outcome.
+
+### Conclusion
+
+Poll mode does **not** fix the enumeration failure, but is being kept
+as a permanent diagnostic tool (`usbhost pollmode on|off`) since it
+lets future investigation directly compare interrupt-driven vs.
+synchronous-polling behavior on demand without needing to reflash.
+Confirmed the toggle itself is safe: disabling only the OTG_FS IRQ
+line does not affect the shell console or Ethernet/HTTP, both of which
+were re-verified fully functional with poll mode on and after turning
+it back off.
+
+- Ruled out this step: async-ISR-vs-synchronous-poll servicing style
+  as the root cause — same ultimate TXERR/"device not responding"
+  outcome either way, only the diagnostic sampling of `HCINT` differed
+  cosmetically.
+- New tool added: `usbhost pollmode [on|off]` — safe, reversible,
+  disables only the OTG_FS NVIC line (not a global interrupt lock).
+- Still ruled out from before: everything in Steps 1-37.
+- Not yet tried: NVIC interrupt priority comparison; full
+  `STM32_USB_Host_Library` core diff beyond `USBH_MAX_ERROR_COUNT`;
+  oscilloscope/DMM instrumentation (still unavailable); trying a
+  different/lower-power USB device on CN13.
