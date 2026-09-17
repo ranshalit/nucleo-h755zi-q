@@ -2965,3 +2965,55 @@ it back off.
   `STM32_USB_Host_Library` core diff beyond `USBH_MAX_ERROR_COUNT`;
   oscilloscope/DMM instrumentation (still unavailable); trying a
   different/lower-power USB device on CN13.
+
+## Step 39: Investigated Zephyr's new native USB Host (UHC) DWC2 driver
+
+Followed up on whether upstream `zephyrproject-rtos/zephyr` code
+(`drivers/usb/common/stm32/*.c`, `drivers/usb/uhc/uhc_dwc2.c`) linked
+by the user could replace/fix our HAL-bridge approach.
+
+### Findings
+
+- Our pinned Zephyr (`v4.2.2`, commit `dbb536326e6`) already ships
+  the generic USB host framework (`subsys/usb/host/usbh_core.c` +
+  `include/zephyr/drivers/usb/uhc.h`) — this part is *not* missing.
+- What's missing is only the DWC2 backend driver itself:
+  `drivers/usb/uhc/uhc_dwc2.c` (2264 lines, 63KB) and its header,
+  copyright-dated 2026, present only on upstream `main`.
+- `drivers/usb/common/stm32/phy_*.c` are small PHY-power-quirk
+  helpers used by the existing device-mode (`UDC_DWC2`) stack;
+  `phy_embeddedfs_ulpi_off.c` only gates ULPI-sub-block sleep-mode
+  clocking — irrelevant to our ULPI-less OTG_FS instance.
+- Searched the **entire** upstream Zephyr tree (via GitHub API,
+  recursive tree listing) for any board overlay, sample, or test
+  referencing `uhc_dwc2` — **zero results**. No board anywhere has
+  ever wired this driver to real hardware.
+- Inspected `uhc_dwc2.h`: vendor-quirk hooks (clock/pinctrl/PHY/VBUS
+  init) are hardcoded for exactly two SoCs —
+  `espressif_esp32_usb_otg_fs` and `nordic_nrf_usbhs_nrf54l`. **No
+  STM32 quirk implementation exists anywhere upstream.**
+- Devicetree compatible also differs: our board's OTG_FS node uses
+  `st,stm32-otgfs` (paired with the existing HAL-bridge/HCD driver);
+  `uhc_dwc2.c` binds only to `compatible = "snps,dwc2"`, requiring a
+  new overlay with properties (`num-in-eps`, `num-out-eps`,
+  `ghwcfg1`, `phys`) that have no existing STM32H7 reference to copy.
+
+### Conclusion
+
+Using `uhc_dwc2.c` on our board is not a small backport — it would
+require **authoring a brand-new Zephyr vendor-quirk driver from
+scratch** for our exact SoC/peripheral (clock enable, pinctrl, PHY
+power sequencing, VBUS GPIO), wiring a new devicetree overlay with no
+prior art, on top of a driver with zero real-hardware validation
+anywhere upstream. Assessed as high-effort/high-uncertainty (likely
+multi-day, may not even build cleanly) relative to expected payoff,
+since the underlying symptom (genuine hardware TXERR / device not
+responding within bus timeout, Steps 1-38) has already been
+characterized as timing/signal-level, not stack-architecture-level.
+Not attempted further without explicit sign-off given the scope.
+
+- Ruled out: "just recompile/enable a Kconfig option" framing of the
+  user's suggestion — the real cost is writing new driver code, not
+  flipping a switch.
+- Still not tried: oscilloscope/DMM on D+/D-/VBUS; different USB
+  device on CN13.
