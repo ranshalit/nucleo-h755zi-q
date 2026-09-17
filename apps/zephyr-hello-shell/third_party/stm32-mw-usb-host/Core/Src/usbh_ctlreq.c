@@ -18,6 +18,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbh_ctlreq.h"
+#include <zephyr/kernel.h>
 
 /** @addtogroup USBH_LIB
   * @{
@@ -1114,6 +1115,23 @@ static USBH_StatusTypeDef USBH_HandleControl(USBH_HandleTypeDef *phost)
       */
       if (++phost->Control.errorcount <= USBH_MAX_ERROR_COUNT)
       {
+        /*
+         * Root-cause note (nucleo_h755zi_q, OTG_FS host, USER USB/CN13):
+         * an immediate retry from this exact code path was found to
+         * reliably re-hit the *same* USB frame/SOF micro-timing phase
+         * every time (this state machine is driven deterministically
+         * from the previous SOF-synchronous event), so if that phase is
+         * marginal for this board/silicon, ALL USBH_MAX_ERROR_COUNT
+         * retries land in the same bad window and enumeration never
+         * recovers - even though manually-spaced retries (which sample
+         * essentially random phases) succeed the majority of the time.
+         * A few hundred microseconds of jitter before retrying is enough
+         * to decorrelate the retry from the frame boundary that caused
+         * the previous failure and let it land in a different (often
+         * good) phase instead.
+         */
+        USBH_Delay(5U + (k_cycle_get_32() % 50U));
+
         /* Do the transmission again, starting from SETUP Packet */
         phost->Control.state = CTRL_SETUP;
         phost->RequestState = CMD_SEND;

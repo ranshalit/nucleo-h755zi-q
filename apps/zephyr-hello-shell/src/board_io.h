@@ -25,6 +25,8 @@ struct board_led_info {
 
 int board_io_init(void);
 int board_blink_threads_start(void);
+void board_blink_threads_suspend(void);
+void board_blink_threads_resume(void);
 
 size_t board_led_count(void);
 const struct board_led_info *board_led_info_get(enum board_led_id led_id);

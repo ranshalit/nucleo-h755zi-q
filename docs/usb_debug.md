@@ -2639,3 +2639,154 @@ conclusions from `FRNUM` specifically.
   `rawtest` path as additive diagnostics; no production-path logic was
   changed. Board's `BCM4` option byte was restored to its
   original (`1`, CM4 auto-boot enabled) state.
+
+## Step 36 — HNPTXSTS diagnostics show hardware *can* succeed under Zephyr; jitter proves a timing-phase collision in `rawtest`; jitter/retry-budget fixes do NOT carry over to the production path
+
+### `rawtest` route: proof the transfer can succeed, and that failure is phase-dependent, not random
+
+Added `HNPTXSTS`/`HCCHAR`/`HCTSIZ`/`HFNUM` register dumps immediately
+before/after `USB_HC_StartXfer()` in both `stm32_hcd_adapter.c`'s
+`rawtest` routine and the bare-metal reference. Running `rawtest`
+repeatedly (manually, via shell) produced a genuinely new result: on
+one invocation it returned `HCINT=0x00000021` (`XFRC|CHH` — a fully
+successful control transfer), immediately followed by a re-run that
+returned `HCINT=0x00000080` (TXERR). This is the first confirmed
+evidence that the raw hardware/HAL **can** complete a real SETUP
+transaction correctly under Zephyr — the peripheral itself is not
+fundamentally broken.
+
+A 6-trial repeated-invocation test with a **fixed** ~2.5 s
+inter-command delay showed a **reproducible-by-call-index** failure
+pattern (e.g. run 2/run 3 always failed). Systematically ruled out as
+the cause of that pattern, each confirmed by dedicated experiments:
+
+- Channel-0 stale state / concurrent contention (pre-existing
+  halt-before-test mitigation already handles this).
+- TX FIFO/queue accumulation across repeated calls (added
+  `USB_FlushTxFifo()` before every `StartXfer` — no change).
+- LED blink-thread background activity (added
+  `board_blink_threads_suspend()`/`resume()` in `board_io.c`, wired
+  into `rawtest` — no change).
+- Ethernet AHB1ENR clock gating during the test window (gated
+  `ETH1MACEN/TXEN/RXEN` around the whole channel-init-through-poll
+  window, not just the earlier SOF probe — no change).
+- A blanket `irq_lock()` around `StartXfer` — inconclusive/likely
+  harmful (produced a *worse*, different failure signature,
+  `HCINT=0x00000000`, on the runs that still failed).
+
+The single most useful result: re-running the same 6-trial test with a
+**jittered** (0–2 s random) inter-command delay instead of a fixed one
+caused the *specific failing run index to shift* (from run2/run3 to
+run3/run4). Changing only the timing of when each attempt starts
+changed which attempt failed — this is the signature of a genuine
+**timing-phase collision** with something periodic, not random noise
+and not monotonic FIFO/state degradation. The periodic culprit itself
+was not identified (blink threads, Ethernet, and FIFO staleness were
+all separately ruled out as *that* culprit too).
+
+### Production-path experiment: retry jitter and a larger retry budget
+
+Reasoned that production's `CTRL_ERROR` retry path
+(`usbh_ctlreq.c`) and outer reconnect path (`usbh_core.c`
+`HOST_DEV_ATTACHED`) retry from an **exactly repeatable relative
+timing offset** each time (deterministic state-machine code path with
+a fixed delay), so if that fixed phase happens to be bad, production
+would never escape it on its own — while manual, human/shell-paced
+`rawtest` invocations naturally sample different phases and often
+succeed. Implemented:
+
+- A jittered delay before re-issuing `SETUP` on `CTRL_ERROR`
+  (`usbh_ctlreq.c`), using `k_cycle_get_32()` as an entropy source
+  (not `SysTick->VAL`, which is not guaranteed to be running under
+  Zephyr's own tick source and was confirmed to give no real jitter).
+- A jittered delay in the outer `HOST_DEV_ATTACHED` reconnect path
+  (`usbh_core.c`).
+- `USBH_MAX_ERROR_COUNT` raised from `0x02` to `0x0A` (`usbh_def.h`)
+  so jitter has more retry attempts to find a working phase before
+  paying for a full reconnect/reset cycle.
+
+Widened the jitter ranges twice (first attempt used only a few raw
+CPU cycles/milliseconds of range — negligible — then widened to
+100+0..199 ms outer / 5+0..49 ms inner). **Result: no change.**
+6/6 manual `vbuscycle` reconnect attempts with the camera attached
+still failed every single time, with byte-identical register
+snapshots (`HCTSIZ=0x60080008`, `HCCHAR=0x20100040`/`0x00100040`)
+every attempt. **The jitter/retry-budget fix that seemed so promising
+from the `rawtest` experiments does *not* transfer to the production
+enumeration path.** This is left in the tree as a harmless robustness
+improvement (more retry budget with jitter can only help, never hurt
+correctness), but it is **not the fix**.
+
+### `HAINTMSK` investigation (false lead, ruled out)
+
+Every production failure printed `HCINT=0x00000000` (as opposed to
+`rawtest`'s `HCINT=0x80` TXERR) — a *different* signature. Added a new
+`usbhost regs` shell command (`usb_host_shell.c`) to dump live
+`GINTSTS`/`GINTMSK`/`HAINT`/`HAINTMSK`, hypothesizing the top-level
+host-channel interrupt mask (`HAINTMSK`) might never be getting set in
+production, which would mean `HAL_HCD_IRQHandler()` never runs for
+channel 0 and only a software timeout could ever finalize the URB —
+matching an all-zero `HCINT`.
+
+Added a diagnostic print directly inside `USBH_LL_OpenPipe()`
+(`stm32_hcd_adapter.c`) showing `HAINTMSK` immediately after
+`HAL_HCD_HC_Init()` returns: it correctly shows `0x00000003` (both
+control pipes' channel-interrupt-enable bits set) right after every
+single pipe open, on every single reconnect. The earlier `0x00000000`
+readings from the `usbhost regs` command were just unlucky snapshots
+taken in the brief window between `USBH_FreePipe()` (on
+`CTRL_ERROR` exhaustion) and the next reconnect's `OpenPipe` — not a
+real bug. **`HAINTMSK`/interrupt wiring is correctly configured during
+the actual transfer window; this is not the cause.** The
+`HCINT=0x00000000` production signature is most likely just a normal
+post-IRQ-clear artifact (the handler already serviced and
+write-cleared the event bits by the time our diagnostic print runs),
+not evidence of a literal "nothing ever happened" hang — this
+reconciles the two signatures (rawtest's `0x80`, production's `0x00`)
+as probably the *same* underlying XACTERR-family event, just observed
+at different points relative to the IRQ's own register-clearing.
+
+Also checked the VBUS load switch's `PG7_nFAULT` pin across every
+attempt in this segment's logs: it never trips (`PG7_nFAULT=1`,
+i.e. no fault, on every single sample). This rules out a hard
+overcurrent/short condition on VBUS as an explanation, though it does
+not rule out a softer voltage-droop that never crosses the load
+switch's fault threshold.
+
+### Updated state of the investigation
+
+- The original symptom (camera on "USER USB"/CN13 never lights up /
+  never enumerates) is **still unresolved** as of this step.
+- Newly confirmed: the raw hardware/HAL, under Zephyr, genuinely *can*
+  complete this exact control transfer successfully at least
+  sometimes (`rawtest` proof). Production's continuous
+  connect/retry/fail loop, however, shows **0% success even with a
+  much wider, real jittered retry** — meaning either (a) the
+  phase-collision theory that explained `rawtest`'s ~50% split does
+  not apply the same way to the full production init/enumeration
+  sequence (different code path, different timing profile before the
+  first `SETUP`), or (b) there is a second, independent factor in the
+  full production environment (background HTTP/network activity,
+  cumulative device/board state across many rapid reconnects, or a
+  power-domain effect) that a short-lived, isolated `rawtest`
+  invocation doesn't reproduce.
+- Ruled out this step: `HAINTMSK`/host-channel interrupt masking,
+  VBUS hard overcurrent (load-switch fault pin).
+- Still ruled out from before: static register misconfiguration,
+  reset timing, channel-0 collision, Ethernet/AHB contention, FIFO
+  staleness, LED blink threads, CM4/dual-core contention, SOF/frame
+  timer generation itself.
+- Not yet tried: suspending the HTTP server thread/TCP-IP stack
+  entirely (not just its AHB clock) during a full production
+  connect/enumerate attempt; instrumenting with a real oscilloscope or
+  DMM on VBUS/D+/D- during a live camera-connect attempt (no such
+  instrument is available to this investigation channel); trying a
+  different/lower-power USB device on CN13 to see if the failure is
+  device-current-draw-dependent.
+- Uncommitted-at-write-time changes from this step: `HNPTXSTS`
+  diagnostics + `USB_FlushTxFifo()` call in `rawtest`
+  (`stm32_hcd_adapter.c`), `board_blink_threads_suspend/resume()`
+  (`board_io.c`/`.h`), jittered retry delays in `usbh_ctlreq.c` and
+  `usbh_core.c`, `USBH_MAX_ERROR_COUNT` raised in `usbh_def.h`, and the
+  new `usbhost regs` shell command plus `USBH_LL_OpenPipe()` debug
+  print in `usb_host_shell.c`/`stm32_hcd_adapter.c`.

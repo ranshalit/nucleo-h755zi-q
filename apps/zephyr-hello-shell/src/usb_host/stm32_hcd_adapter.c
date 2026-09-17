@@ -347,9 +347,22 @@ USBH_StatusTypeDef USBH_LL_OpenPipe(USBH_HandleTypeDef *phost, uint8_t pipe,
 				    uint16_t mps)
 {
 	HCD_HandleTypeDef *hcd = phost->pData;
+	HAL_StatusTypeDef ret;
 
-	return HAL_HCD_HC_Init(hcd, pipe, epnum, dev_address, speed, ep_type, mps) ==
-		       HAL_OK ? USBH_OK : USBH_FAIL;
+	ret = HAL_HCD_HC_Init(hcd, pipe, epnum, dev_address, speed, ep_type, mps);
+
+	{
+		USB_OTG_HostTypeDef *hreg =
+			(USB_OTG_HostTypeDef *)((uint32_t)hcd->Instance + USB_OTG_HOST_BASE);
+
+		printf("USBH_LL_OpenPipe: pipe=%u epnum=0x%02x ep_type=%u ret=%d "
+		       "HAINTMSK=0x%08lx GINTMSK=0x%08lx\n",
+		       pipe, epnum, ep_type, (int)ret,
+		       (unsigned long)hreg->HAINTMSK,
+		       (unsigned long)hcd->Instance->GINTMSK);
+	}
+
+	return ret == HAL_OK ? USBH_OK : USBH_FAIL;
 }
 
 USBH_StatusTypeDef USBH_LL_ClosePipe(USBH_HandleTypeDef *phost, uint8_t pipe)
@@ -603,6 +616,35 @@ int stm32_hcd_adapter_raw_control_test(void)
 		       (unsigned long)host_regs->HFIR);
 
 		/*
+		 * Clean re-check of FRNUM with a tight busy-poll (matching
+		 * the GINTSTS.SOF probe's own polling style exactly: no
+		 * k_msleep, no scheduler yield, just k_busy_wait), since the
+		 * previous k_msleep(1)-based sweep showed FRNUM static even
+		 * once GINTSTS.SOF itself was independently confirmed to be
+		 * toggling in this same IRQ-disabled window. If FRNUM still
+		 * reads static here, the discrepancy is not explained by
+		 * scheduler/sleep granularity and needs its own follow-up;
+		 * if it now changes, k_msleep's tick granularity (or a
+		 * yield-related side effect) was the artifact.
+		 */
+		uint16_t frnum3_first = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
+		uint16_t frnum3_last = frnum3_first;
+		int frnum3_changed = 0;
+
+		for (int i = 0; i < 5000; i++) {
+			uint16_t f = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
+
+			if (f != frnum3_last) {
+				frnum3_changed++;
+			}
+			frnum3_last = f;
+			k_busy_wait(1);
+		}
+		printf("rawtest: FRNUM tight busy-poll over ~5ms (no k_msleep): first=%u last=%u "
+		       "changed=%d times\n",
+		       frnum3_first, frnum3_last, frnum3_changed);
+
+		/*
 		 * Experiment: bare-metal reference never re-enters the
 		 * HPRT PENCHNG interrupt path that HAL's USB_InitFSLSPClkSel()
 		 * uses to rewrite HFIR to 48000; it stays at the silicon
@@ -757,6 +799,14 @@ int stm32_hcd_adapter_raw_control_test(void)
 	printf("rawtest: HCCHAR(ch0) after halt = 0x%08lx\n",
 	       (unsigned long)USBx_HC(0)->HCCHAR);
 
+	/*
+	 * Experiment: gate Ethernet's AHB clocks off across the whole
+	 * channel-init-through-transfer window (not just the earlier SOF
+	 * probe) to test whether Ethernet MAC/DMA AHB traffic is stalling
+	 * the OTG core's FIFO fetch during the actual SETUP transmission,
+	 * which the earlier SOF-only test (a trivial 1-bit event, no FIFO
+	 * access) would not have exercised.
+	 */
 	hc->dev_addr = 0;
 	hc->ch_num = ch;
 	hc->ep_num = 0;
@@ -780,6 +830,21 @@ int stm32_hcd_adapter_raw_control_test(void)
 	if (ret != HAL_OK) {
 		return -EIO;
 	}
+
+	/*
+	 * Experiment: HNPTXSTS's upper (queue-depth-tracking) bits were
+	 * observed to accumulate across repeated rawtest invocations within
+	 * the same boot (0x00->0x07->stays 0x07), never reset by
+	 * USB_HC_Init(). Flush the non-periodic TX FIFO/queue here to test
+	 * whether stale request-queue state from prior attempts on this (or
+	 * any) channel is what makes later attempts within the same boot
+	 * intermittently fail while the very first attempt after a fresh
+	 * boot/reset (matching bare-metal, which is always a fresh boot)
+	 * reliably succeeds.
+	 */
+	ret = USB_FlushTxFifo(USBx, 0x10U /* all Tx FIFOs */);
+	printf("rawtest: USB_FlushTxFifo -> %d HNPTXSTS=0x%08lx (after flush)\n",
+	       ret, (unsigned long)USBx->HNPTXSTS);
 
 	printf("rawtest: before StartXfer HCCHAR=0x%08lx HCTSIZ=0x%08lx "
 	       "HCINT=0x%08lx GINTSTS=0x%08lx\n",
@@ -829,8 +894,21 @@ int stm32_hcd_adapter_raw_control_test(void)
 	 */
 	usb_gpio_capture_arm();
 
+	printf("rawtest: before StartXfer2: HNPTXSTS=0x%08lx HFNUM=0x%08lx (parity used for "
+	       "ODDFRM will be derived from this)\n",
+	       (unsigned long)USBx->HNPTXSTS,
+	       (unsigned long)((USB_OTG_HostTypeDef *)((uintptr_t)USBx + USB_OTG_HOST_BASE))
+		       ->HFNUM);
+
 	ret = USB_HC_StartXfer(USBx, hc, 0 /* no DMA */);
 	printf("rawtest: USB_HC_StartXfer -> %d\n", ret);
+	printf("rawtest: after StartXfer2: HNPTXSTS=0x%08lx HCCHAR=0x%08lx (CHENA=%lu "
+	       "ODDFRM=%lu) HCTSIZ=0x%08lx\n",
+	       (unsigned long)USBx->HNPTXSTS,
+	       (unsigned long)USBx_HC(ch)->HCCHAR,
+	       (unsigned long)((USBx_HC(ch)->HCCHAR & USB_OTG_HCCHAR_CHENA) != 0),
+	       (unsigned long)((USBx_HC(ch)->HCCHAR & USB_OTG_HCCHAR_ODDFRM) != 0),
+	       (unsigned long)USBx_HC(ch)->HCTSIZ);
 
 	if (usb_gpio_capture_armed()) {
 		usb_gpio_capture_run(USB_GPIO_CAPTURE_MAX_SAMPLES);
@@ -869,9 +947,10 @@ int stm32_hcd_adapter_raw_control_test(void)
 		uint32_t hctsiz = USBx_HC(ch)->HCTSIZ;
 
 		printf("rawtest: poll[%02d] HCINT=0x%08lx HCCHAR=0x%08lx "
-		       "HCTSIZ=0x%08lx GINTSTS=0x%08lx\n",
+		       "HCTSIZ=0x%08lx GINTSTS=0x%08lx HNPTXSTS=0x%08lx\n",
 		       i, (unsigned long)hcint, (unsigned long)hcchar,
-		       (unsigned long)hctsiz, (unsigned long)USBx->GINTSTS);
+		       (unsigned long)hctsiz, (unsigned long)USBx->GINTSTS,
+		       (unsigned long)USBx->HNPTXSTS);
 
 		if (hcint != 0U) {
 			printf("rawtest: HCINT went non-zero after %d polls, stopping\n", i);

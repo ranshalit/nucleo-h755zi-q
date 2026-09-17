@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "stm32_hcd_adapter.h"
 #include "usb_gpio_capture.h"
+#include "../board_io.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -18,6 +19,7 @@
 K_THREAD_STACK_DEFINE(usb_host_poll_stack, USB_HOST_POLL_THREAD_STACK_SIZE);
 static struct k_thread usb_host_poll_thread;
 static atomic_t usb_host_poll_paused = ATOMIC_INIT(1);
+static atomic_t usb_host_poll_busy = ATOMIC_INIT(0);
 static USBH_HandleTypeDef usb_host;
 static int usb_host_init_result = -EAGAIN;
 
@@ -298,12 +300,24 @@ static int cmd_usbhost_rawtest(const struct shell *shell, size_t argc, char **ar
 	atomic_set(&usb_host_poll_paused, 1);
 	k_msleep(5); /* let any in-flight USBH_Process() iteration finish */
 
+	/*
+	 * Experiment: the LED blink threads (400ms/700ms periods) run
+	 * continuously and were found to correlate with intermittent
+	 * TXERR/hang results in repeated back-to-back rawtest runs -
+	 * shifting the inter-command delay shifted *which* run failed,
+	 * proving a timing-phase collision rather than random hardware
+	 * flakiness. Suspend them for the duration of this test to see if
+	 * that alone restores 100% reliability.
+	 */
+	board_blink_threads_suspend();
+
 	shell_print(shell,
 		    "running bare-metal HAL HC_Init/StartXfer control test "
 		    "(bypasses USBH middleware, middleware polling paused); "
 		    "watch console for 'rawtest:' lines");
 	ret = stm32_hcd_adapter_raw_control_test();
 
+	board_blink_threads_resume();
 	atomic_set(&usb_host_poll_paused, 0);
 	return ret;
 }
@@ -397,6 +411,35 @@ static int cmd_usbhost_gpio(const struct shell *shell, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_usbhost_regs(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	/*
+	 * Production consistently shows HCINT=0x00000000 with HC_state=2
+	 * (halted, presumably by a software URB timeout) on every single
+	 * attempt -- never even an error bit set -- unlike rawtest's direct
+	 * register polling, which sometimes sees real hardware events
+	 * (XFRC/XACTERR). If the global/host interrupt-enable chain
+	 * (GINTMSK.HCIM, HAINTMSK, channel-0 HCINTMSK) isn't actually wired
+	 * up the same way in the production init path, HAL_HCD_IRQHandler()
+	 * would never run for this channel and the driver could only ever
+	 * see a timeout, exactly matching what's observed.
+	 */
+	USB_OTG_GlobalTypeDef *greg = (USB_OTG_GlobalTypeDef *)USB_OTG_FS;
+	USB_OTG_HostTypeDef *hreg =
+		(USB_OTG_HostTypeDef *)((uint32_t)USB_OTG_FS + USB_OTG_HOST_BASE);
+
+	shell_print(shell, "GINTSTS=0x%08lx GINTMSK=0x%08lx (HCIM bit25=%lu)",
+		    (unsigned long)greg->GINTSTS, (unsigned long)greg->GINTMSK,
+		    (unsigned long)((greg->GINTMSK >> 25) & 0x1U));
+	shell_print(shell, "HAINT=0x%08lx HAINTMSK=0x%08lx (ch0=%lu)",
+		    (unsigned long)hreg->HAINT, (unsigned long)hreg->HAINTMSK,
+		    (unsigned long)(hreg->HAINTMSK & 0x1U));
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(status, NULL, "Show ST USB host state", cmd_usbhost_status),
 	SHELL_CMD(descriptor, NULL, "Show enumerated device descriptor",
@@ -422,6 +465,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(gpio, NULL,
 		  "Dump live PA11/PA12 GPIO mode/AF/speed/pull registers",
 		  cmd_usbhost_gpio),
+	SHELL_CMD(regs, NULL,
+		  "Dump live GINTMSK/HAINT/HAINTMSK interrupt-enable registers",
+		  cmd_usbhost_regs),
 	SHELL_SUBCMD_SET_END
 );
 

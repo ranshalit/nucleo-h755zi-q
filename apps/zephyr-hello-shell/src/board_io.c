@@ -179,6 +179,22 @@ size_t board_led_count(void)
 	return ARRAY_SIZE(board_leds);
 }
 
+void board_blink_threads_suspend(void)
+{
+	if (blink_threads_started) {
+		k_thread_suspend(&yellow_led_blink_thread);
+		k_thread_suspend(&red_led_blink_thread);
+	}
+}
+
+void board_blink_threads_resume(void)
+{
+	if (blink_threads_started) {
+		k_thread_resume(&yellow_led_blink_thread);
+		k_thread_resume(&red_led_blink_thread);
+	}
+}
+
 const struct board_led_info *board_led_info_get(enum board_led_id led_id)
 {
 	struct board_led *led = board_led_from_id(led_id);

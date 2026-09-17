@@ -19,6 +19,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbh_core.h"
+#include <zephyr/kernel.h>
 
 
 /** @addtogroup USBH_LIB
@@ -546,8 +547,17 @@ USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost)
         phost->pUser(phost, HOST_USER_CONNECTION);
       }
 
-      /* Wait for 100 ms after Reset */
-      USBH_Delay(100U);
+      /*
+       * Wait for 100 ms after Reset, plus a small jitter. Fixed delays
+       * here reproduce the exact same SOF/frame micro-phase for the
+       * first control transfer on every reconnect cycle; if that phase
+       * happens to be marginal for this board/silicon, enumeration
+       * would deterministically fail every single reconnect attempt
+       * (observed on nucleo_h755zi_q OTG_FS host / USER USB). The
+       * jitter decorrelates successive attempts from the frame
+       * boundary so they don't all resample the same bad window.
+       */
+      USBH_Delay(100U + (k_cycle_get_32() % 200U));
 
       phost->device.speed = (uint8_t)USBH_LL_GetSpeed(phost);
 

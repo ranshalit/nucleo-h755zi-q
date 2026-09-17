@@ -192,7 +192,16 @@ extern "C" {
 #define USBH_DEVICE_ADDRESS_DEFAULT                        0x00U
 #define USBH_DEVICE_ADDRESS                                0x01U
 
-#define USBH_MAX_ERROR_COUNT                               0x02U
+/*
+ * Bumped from the vendor default of 2. On this board (nucleo_h755zi_q OTG_FS
+ * host / USER USB), control-transfer errors were found to be a timing-phase
+ * collision: retries jittered in time succeed at a rate well above 50%, but
+ * only 2 retries rarely land on a good phase before the whole port is torn
+ * down and reconnected. Allowing more in-place retries (each now jittered,
+ * see usbh_ctlreq.c CTRL_ERROR) gives the phase far more chances to shift
+ * into a working window without paying the cost of a full reconnect/reset.
+ */
+#define USBH_MAX_ERROR_COUNT                               0x0AU
 
 #if (USBH_USE_OS == 1U)
 #define MSGQUEUE_OBJECTS                                   0x10U
