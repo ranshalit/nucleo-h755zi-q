@@ -25,7 +25,7 @@
 #include <ff.h>
 #include <stdio.h>
 
-LOG_MODULE_REGISTER(msc_demo);
+LOG_MODULE_REGISTER(msc_demo, LOG_LEVEL_NONE);
 
 USBD_DEFINE_MSC_LUN(ram, "RAM", "Zephyr", "RAMDisk", "0.00");
 
