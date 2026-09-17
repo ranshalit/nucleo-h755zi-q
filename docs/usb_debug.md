@@ -1596,3 +1596,109 @@ while `CIDSTS=1`. It confirms the CN12 ID jumper has **no effect on
 mode selection in this codebase, in either direction** — it may be
 left in place or removed with no expected change to either the Host-
 or Device-mode firmware's behavior.
+
+## Step 28: Re-confirmation, ID jumper decision, and forward debugging plan
+
+### Re-confirmation (next day, fresh session)
+
+Re-checked the Device-mode CDC-ACM test firmware from Step 26 in a new
+session, without reflashing anything:
+
+```
+$ lsusb
+Bus 003 Device 049: ID 2fe3:0001 NordicSemiconductor Zephyr CDC ACM sample
+```
+
+Device number changed (026→049 — some reconnect/power-cycle happened
+between sessions) but it re-enumerated cleanly on its own. Re-ran the
+bidirectional echo test:
+
+```
+sent:     'still alive?'
+received: 'still alive?'
+```
+
+Still works. This further reinforces Step 26: the USER USB physical
+path is reliably functional in Device mode, not a one-off fluke.
+
+### Does the Device-mode success prove Host mode hardware works too?
+
+Mostly yes, with one nuance. Device and Host mode share the identical
+analog path: D+/D−, the embedded OTG_FS PHY, CN13, and the solder
+joints/traces to PA11/PA12 — a broken/dead transceiver could not
+selectively work in only one mode. That rules out a dead-bus hardware
+explanation.
+
+What Device mode does *not* exercise: VBUS *drive* out to an attached
+device (PD10 + load switch — Device mode only *senses* VBUS via PA9),
+and host-specific pull-down/chirp logic. However, our own **prior**
+Host-mode logs (well before Step 26) already independently showed
+VBUS drive present (`PA9=1`), `HPRT` reporting a correctly reset/
+enabled port, before the SETUP-token STALL occurred — so those
+host-specific circuits were already confirmed working on their own.
+Combined, this gives high confidence the *entire* electrical/physical
+path required for Host mode is sound on this board. The remaining
+fault is isolated to the Host-mode firmware/HCD software path.
+
+### CN12 ID jumper (pin 33 ↔ 39): decision — leave it connected
+
+Per Step 27, `USB_SetCurrentMode()` in the vendored HAL
+(`stm32h7xx_ll_usb.c`) forces the OTG core's role unconditionally via
+`GUSBCFG.FHMOD`/`FDMOD` and never reads `GOTGCTL.CIDSTS` — confirmed
+directly from source, not inferred. Per Step 18, physically grounding
+vs. floating the ID pin already made zero difference to the Host-mode
+STALL outcome. **Decision: leave the jumper in place for all further
+debugging steps below.** It has no bearing on any of them, and removing/
+reinstalling it only risks introducing an unrelated variable.
+
+### Forward debugging plan — proving/fixing USB Host mode
+
+Zephyr was checked for a native USB Host Controller (UHC) driver for
+this SoC first, since Step 26 showed Zephyr's own Device stack works
+correctly here — if a stock Zephyr Host stack existed for STM32 OTG_FS,
+repeating the "use ST's own/upstream code as-is" trick from Step 26
+would be the fastest possible test. **Result: no such driver exists.**
+`drivers/usb/uhc/` only implements NXP MCUX controllers
+(`uhc_mcux_*.c`) and the external SPI `MAX3421E` chip
+(`uhc_max3421e.c`) — there is no `uhc_stm32*.c`. So Zephyr's own Host
+stack cannot be used as a stock reference on this hardware; the custom
+`stm32_hcd_adapter.c` (or ST's USBH middleware, already proven to fail
+identically per Step 19) remain the only Host-mode code paths available
+on this SoC/RTOS combination.
+
+Prioritized next steps:
+
+1. **OTG core register diff, Device-mode-working vs. Host-mode-failing**
+   (highest value, no new tooling/risk). Dump `GAHBCFG`, `GUSBCFG`,
+   `GRXFSIZ`, `DIEPTXF0`/`GNPTXFSIZ` right after the Step 26 Device-mode
+   init succeeds, and compare bit-for-bit against what our Host-mode
+   init programs (`GRXFSIZ`, `HNPTXFSIZ`, `HPTXFSIZ`, `HCFG`). FIFO RAM
+   is a small fixed shared pool on this core — an incorrect RX/TX/
+   periodic-TX FIFO split is a classic silent-failure mode that would
+   not produce an obvious HAL error, just malformed/truncated transfers
+   on the wire, which matches our symptom (STALL/no-response on the
+   very first SETUP).
+2. **Live SWD single-step through the real SETUP submission.** We have
+   a working ST-LINK V3/SWD connection (confirmed this session). Use
+   `pyocd`/GDB to halt right at `HAL_HCD_HC_SubmitRequest()` and
+   single-step `HCCHAR`/`HCTSIZ`/`HCINT` register writes in real time —
+   catches anything a `printf` snapshot could miss (e.g. a write being
+   silently ignored or self-clearing before the next log line).
+3. **Minimal bare-metal host test, bypassing both our adapter code and
+   ST's USBH middleware.** Since both hit the identical STALL (Step
+   19), the shared suspect is the HAL/LL HCD layer itself or the
+   peripheral-init sequence feeding it. A tiny standalone test — core
+   reset, force host mode, power port, wait connect, manually poke one
+   control channel, no state machine/retries, full register log at
+   every step — isolates the fault to core-init vs. HCD-runtime vs.
+   middleware-state-machine.
+4. **Targeted re-pass of the H7 errata doc for Host-mode-specific
+   entries.** The SWD probe (this session) confirmed exact silicon:
+   `Device ID 0x450, Revision ID Rev V`. Re-search
+   `docs/es0596-stm32h7rxx7sxx-device-errata-stmicroelectronics.md`
+   filtered specifically to Host-mode DMA/FIFO errata (Step 16 only
+   found the ID-pin erratum so far).
+5. **Enable deeper HAL/USBH debug tracing** if available, for one more
+   layer of visibility beyond our own hand-placed log points.
+
+Starting with item 1 next.
