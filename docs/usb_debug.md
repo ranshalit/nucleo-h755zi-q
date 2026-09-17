@@ -1935,3 +1935,154 @@ for a meaningful plan item 4 and is carried forward as an open task.
    re-check for any known Host-mode channel-halt/lockup erratum before
    concluding this is a design-level bug vs. a documented silicon
    limitation with a known workaround.
+
+## Step 31 — Bare-metal (no Zephyr, no RTOS) A/B test does NOT reproduce the stuck-channel symptom → bug is Zephyr-specific, not hardware/errata
+
+Followed through on plan item 3's logical conclusion: built a
+completely independent, minimal bare-metal firmware using ST's own
+unmodified STM32CubeH7 HAL (no Zephyr, no USBH middleware, no RTOS,
+no shared/threaded IRQ handling) that performs the *exact* same raw
+`HAL_HCD_HC_Init()` / `USB_HC_StartXfer()` control-transfer probe on
+host channel 1 that the Zephyr rawtest used in Step 30, on the same
+physical board/connector/cable/camera.
+
+### Build
+
+- Based on ST's vendored `STM32CubeH7` GPIO_Demo example for
+  NUCLEO-H745ZI-Q (closest family match; H745/H755 share package and
+  pinout, differ mainly in TrustZone/security — irrelevant here).
+- CM7-only application logic; CM4 required ST's stock prebuilt
+  `GPIO_Demo_CM4.elf` (harmless blink app) flashed to bank 2
+  (`0x08100000`) plus the option byte `BCM4=1` (CM4 auto-boot enabl
+  ed) and the standard HSEM release handshake in `main()` — **without
+  this, D2 domain (which hosts `USART3` and `USB_OTG_FS`) never wakes
+  and CM7 accesses to those peripherals hang silently.** (See "Gotchas"
+  below — this cost the most debugging time.)
+- Clock/pin setup deliberately mirrors the already-proven-working
+  Zephyr configuration: `USB_OTG_FS` kernel clock from **HSI48**
+  (matching the board's devicetree `STM32_SRC_HSI48`/`USB_SEL(3)`),
+  `USART3` on PD8/PD9 at 115200 baud (matching Zephyr's console UART),
+  PA11/PA12 AF10 (`OTG1_FS`) for D-/D+, PD10 active-low VBUS enable.
+- Built with the Zephyr SDK's `arm-zephyr-eabi-gcc` (no ARM
+  `nano.specs`/`nosys.specs` available in that SDK — linked with
+  custom minimal newlib syscall stubs instead).
+- `HCD_HandleTypeDef.Init` mirrors the Zephyr adapter's field values
+  (`Host_channels=8`, `HCD_SPEED_FULL`, `HCD_PHY_EMBEDDED`,
+  `Sof_enable=ENABLE`, DMA/low-power/VBUS-sensing all disabled).
+
+### Gotchas hit while bringing this up (for future reference)
+
+- **`USBx_HPRT0`/`USBx_HC(i)`/`USBx_HOST` macros require locally
+  declared `USBx`/`USBx_BASE` variables** — they are not globally
+  defined constants; ST's own HAL functions declare
+  `uint32_t USBx_BASE = (uint32_t)USBx;` at the top of each function
+  body. Any external code using these macros must do the same.
+- The FS USB peripheral's clock-enable macro on dual-core H7 parts is
+  `__HAL_RCC_USB2_OTG_FS_CLK_ENABLE()` — despite the "USB2" in the
+  name, this is the peripheral mapped to `USB_OTG_FS`/PA11-12 ("USB1"
+  in ST's naming refers to `USB_OTG_HS`).
+- **The dual-core boot handshake is not optional**, even for a
+  CM7-only test that never touches CM4 functionally: CM7's access to
+  any AHB1/D2-domain peripheral (`USART3`, `USB_OTG_FS`) blocks
+  forever unless (a) CM4 has actual (even trivial) code to run, (b)
+  the `BCM4` option byte enables CM4 auto-boot at reset, and (c) CM7
+  performs the standard `HAL_HSEM_FastTake`/`HAL_HSEM_Release`
+  handshake after `SystemClock_Config()` to wake D2 domain. Skipping
+  any one of these three causes a silent hang with a truncated/no
+  UART print — this was misdiagnosed twice before finding the actual
+  root cause below.
+- **The actual root cause of persistent, exact, byte-identical
+  truncated UART output** (always exactly 12 bytes: `"\r\n\r\nbare-met"`)
+  turned out to be unrelated to CM4/D2 domain at all: the hand-written
+  `Makefile` never compiled/linked `stm32h7xx_it.c`, so `SysTick_Handler`
+  (and `HardFault_Handler`, etc.) remained the **weak, default
+  infinite-loop stub** from the startup file instead of the real
+  `HAL_IncTick()`-calling handler. The very first SysTick interrupt
+  after `HAL_Init()` vectored into that infinite loop and the CPU never
+  returned — confirmed conclusively via `STM32_Programmer_CLI -c
+  port=SWD mode=HOTPLUG -halt -coreReg PC LR MSP PSP XPSR`, which
+  showed `PC` frozen at the `ADC3_IRQHandler`/default-handler infinite
+  self-branch, `LR` an `EXC_RETURN` value, and `XPSR.IPSR=15` (the
+  SysTick exception number) — i.e., **stuck forever inside the SysTick
+  exception**, not in application code. (Note: querying core state
+  with the default `mode=UR`/software-reset connect silently resets
+  the chip on every invocation and always reports the reset vector —
+  useless for live-hang inspection; `mode=HOTPLUG` avoids the reset
+  and reports the true live PC/registers. This is a much more reliable
+  live-inspection technique than the previously-abandoned pyocd/OpenOCD
+  route, which still fails outright on this dual-core part's CoreSight
+  topology.) Adding `stm32h7xx_it.c` to the Makefile's source list
+  fixed it immediately.
+
+### Result
+
+With the fix applied, the bare-metal firmware boots cleanly and the
+channel-1 probe **completes on the very first poll iteration**:
+
+```
+bare-metal usbh rawtest: boot OK
+HAL_HCD_Init OK
+HAL_HCD_Start OK
+HPRT after VBUS+200ms = 0x00021403 (PCSTS=1 PENA=0)
+HPRT after port reset = 0x0002140f
+HAL_HCD_HC_Init(ch=1) -> 0
+before StartXfer HCCHAR=0x00100040 HCTSIZ=0x00000000 HCINT=0x00000000 GINTSTS=0x05000029
+USB_HC_StartXfer -> 0
+poll[00] HCINT=0x00000021 HCCHAR=0x20100040 HCTSIZ=0x20000008 HFNUM=0x2e75001b HPRT=0x0002140f GINTSTS=0x07000029
+HCINT went non-zero after 0 polls, stopping
+done - halting
+```
+
+`HCINT=0x00000021` = `XFRC` (bit 0, transfer completed) | `ACK`
+(bit 5) — the control-transfer SETUP transaction completed normally
+and was ACKed, on the **very first poll**, with **no stall, no
+lockup, and no CHENA/CHDIS contradiction**. `HPRT` shows the port
+enabled/connected (`PCSTS=1`) throughout, and `HFNUM` shows a live,
+advancing frame counter (`0x2e75001b`), confirming the core's SOF/frame
+timer and USB clock are healthy.
+
+**This is the opposite of the Zephyr rawtest's result** (Step 30):
+under Zephyr, `HCCHAR` showed a contradictory simultaneous
+`CHENA=1`/`CHDIS=1`, and `HCINT` stayed stuck at `0x00000000` for the
+entire ~200 ms poll window with zero completions of any kind.
+
+### Conclusion
+
+**The USB Host channel lockup is not a hardware defect, not a silicon
+errata, and not a fundamental limitation of this board's `USB_OTG_FS`
+peripheral.** Identical hardware, identical pins, identical clock
+source (HSI48), identical camera, identical cable, identical
+`HAL_HCD_HC_Init()`/`USB_HC_StartXfer()` call sequence — the only
+variable that changed was the software stack around it (bare-metal
+ST HAL vs. Zephyr's `stm32_hcd_adapter.c` + USBH driver + RTOS
+scheduling/IRQ handling) — and the bug disappears entirely on
+bare-metal. **The root cause is isolated to the Zephyr integration
+layer**, not the STM32H755 host-mode hardware itself. This rules out
+plan item 4 (errata) as the explanation and redirects further work
+squarely at the Zephyr HCD adapter / USBH driver interaction: likely
+candidates are IRQ handling/priority/masking differences, a missed or
+double register write in the adapter (e.g. something writing `CHDIS`
+that HAL's own `USB_HC_StartXfer()` never does — noted but unexplained
+in Step 30), or a race between Zephyr's channel-arm path and its ISR.
+
+### Next steps
+
+1. Line-by-line diff `stm32_hcd_adapter.c`'s channel start/IRQ path
+   against ST's stock `stm32h7xx_hal_hcd.c`/`stm32h7xx_ll_usb.c` used
+   here unmodified, focusing on anything that could set `CHDIS`
+   without `CHENA` ever completing, or that masks/misroutes the
+   `OTG_FS` global interrupt before the channel-halt/completion
+   interrupt is serviced.
+2. Re-run the Zephyr rawtest with the Zephyr IRQ handler temporarily
+   patched to log entry/exit and raw `HCINT`/`HCCHAR` on every
+   invocation, to see whether the ISR ever runs at all during the
+   stuck window (if it never runs, the bug is upstream — NVIC
+   config/masking; if it runs but doesn't clear the right bits, the
+   bug is in the adapter's ISR body itself).
+3. Once fixed, re-run this exact bare-metal test as a regression
+   baseline/reference alongside the corrected Zephyr driver to confirm
+   parity.
+4. Errata sheet mismatch (STM32H7R/H7S vs. real H745/755/747/757) noted
+   in Step 30 remains an open documentation gap, but is now
+   deprioritized given the bare-metal result already rules out a
+   hardware/errata-level explanation.
