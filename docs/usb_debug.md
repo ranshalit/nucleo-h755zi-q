@@ -3132,3 +3132,33 @@ after to restore the board to its default debugging state.
   connector/silicon is still 100% solid on demand, days later.
   Nothing has regressed on that side. The bug remains isolated to
   the Host-mode (HCD) path.
+
+## Step 43: Restored board to Device-mode (fresh build) for demo prep
+
+User decided to pursue a live-video demo and asked to restore the
+board to USB Device mode as a starting baseline, ahead of building
+either a USB MSC (stored-file) demo or an Ethernet-streaming demo.
+
+Rebuilt (not just reflashed the stale artifact) the stock
+`samples/subsys/usb/cdc_acm` sample fresh via:
+
+```
+west build -p always -b nucleo_h755zi_q/stm32h755xx/m7 \
+  samples/subsys/usb/cdc_acm -d /tmp/stm32h7-zephyr-cdc-acm
+```
+
+(required `ZEPHYR_SDK_ROOT=/home/ranshal/.local/zephyr-sdk-1.0.1`,
+`ZEPHYR_TOOLCHAIN_VARIANT=cross-compile` env vars, matching
+`scripts/flash_zephyr_hello_shell.sh`'s toolchain detection.)
+
+Flashed via `STM32_Programmer_CLI ... mode=UR reset=HWrst`. Verified:
+
+```
+$ lsusb
+Bus 003 Device 065: ID 2fe3:0001 NordicSemiconductor Zephyr CDC ACM sample
+```
+
+Board is now in Device mode, ready as a base for the next demo step
+(either extending this sample toward USB MSC file-transfer, or
+building an Ethernet-based MJPEG/UDP live-video streamer per the
+user's stated preference for Ethernet over USB for the "live" case).
