@@ -1702,3 +1702,96 @@ Prioritized next steps:
    layer of visibility beyond our own hand-placed log points.
 
 Starting with item 1 next.
+
+## Step 29: OTG core register diff, Device-mode vs. Host-mode (plan item 1)
+
+Executed plan item 1 from Step 28: captured a fair, same-lifecycle-stage
+register dump from both modes and diffed them.
+
+### Method
+
+- **Host mode**: added temporary diagnostic `printf()`s to
+  `stm32_hcd_adapter.c` — one right after `USB_HostInit()` (dumping
+  `GAHBCFG`, `GRXFSIZ`, `HNPTXFSIZ` i.e. `DIEPTXF0_HNPTXFSIZ`,
+  `HPTXFSIZ`, `HCFG`), and one right after `HAL_HCD_Start()` inside
+  `USBH_LL_Start()` (dumping `GAHBCFG`/`GUSBCFG` again, since the first
+  dump happens before the core's global-interrupt-enable step and isn't
+  a fair baseline by itself).
+- **Device mode**: copied the stock `cdc_acm` sample (from Step 26) to
+  a scratch build directory (`/tmp/cdc_acm_diag`, not committed) and
+  added one `printk()` right after `usb_enable()` succeeds, reading the
+  same OTG_FS core registers directly by address (`0x40080000` base,
+  confirmed to match `usbotg_fs` in the board's devicetree). Built and
+  flashed exactly like Step 26 (same toolchain env vars).
+- Captured serial output over the ST-LINK VCP (`/dev/ttyACM0`) across a
+  cold hardware reset for each firmware image.
+
+### Results
+
+Host mode (after `HAL_HCD_Start()`, matching the Device-mode dump's
+lifecycle stage — post-enable, before any transfer):
+```
+GAHBCFG=0x00000001  GUSBCFG=0x20001440
+```
+Host mode (right after `USB_HostInit()`, one step earlier):
+```
+GAHBCFG=0x00000000  GRXFSIZ=0x00000200  HNPTXFSIZ=0x01000200
+HPTXFSIZ=0x00e00300  HCFG=0x00000200
+```
+
+Device mode (right after `usb_enable()`):
+```
+GAHBCFG=0x00000001  GUSBCFG=0x40001440  GRXFSIZ=0x000000a0
+DIEPTXF0=0x001000a0  GCCFG=0x00010000
+```
+
+### Analysis
+
+- **`GAHBCFG` matches exactly** (`0x00000001`, i.e. `GINT` enabled,
+  everything else identical) once compared at the same lifecycle
+  stage. The earlier "0x00000000" Host-mode value was a false lead —
+  it was simply captured one step too early (before `HAL_HCD_Start()`
+  sets `GINT`), not a real Host-vs-Device discrepancy.
+- **`GUSBCFG` differs only in the expected mode-select bit**: Host has
+  `FHMOD` (bit 5, `0x20`) set, Device has `FDMOD` (bit 6, `0x40`) set;
+  every other bit (`TRDT`, `TOCAL`, etc. — the `0x1440`/`...440` common
+  part) is identical. This is exactly what should differ between the
+  two modes and confirms no unwanted stray bits in either.
+- **FIFO sizing (`GRXFSIZ`/`HNPTXFSIZ`/`HPTXFSIZ`) is set by
+  unmodified, stock ST HAL code**, not anything specific to this
+  board/port. Confirmed directly from
+  `stm32h7xx_ll_usb.c:USB_HostInit()`:
+  ```c
+  USBx->GRXFSIZ  = 0x200U;
+  USBx->DIEPTXF0_HNPTXFSIZ = (((0x100U << 16) & USB_OTG_NPTXFD) | 0x200U);
+  USBx->HPTXFSIZ = (((0xE0U << 16) & USB_OTG_HPTXFSIZ_PTXFD) | 0x300U);
+  ```
+  These three lines are unconditional, hard-coded literals in ST's own
+  HAL — every STM32H7 project using this HAL Host-mode driver gets
+  these exact same FIFO values, regardless of board or application.
+  Since sibling board thread 154603 (Step 24) reports working Host
+  mode using presumably this same unmodified HAL, this register
+  configuration can be ruled out as the fault: it is proven-working
+  elsewhere on the identical silicon/HAL combination.
+- Device mode's much smaller `GRXFSIZ`/`DIEPTXF0` (0xa0/0x10 vs.
+  0x200/0x100) reflect Zephyr's own device-side FIFO sizing logic
+  (endpoint-count/MPS-driven, set by `udc_stm32.c`), not a HAL default
+  — not a comparable data point, just confirms each stack sizes FIFOs
+  for its own purpose.
+
+### Conclusion for plan item 1
+
+**No discrepancy found at the OTG core/FIFO register level.** Both
+modes program `GAHBCFG` identically, `GUSBCFG` identically apart from
+the required mode bit, and the Host-mode FIFO partitioning is verified
+to be stock, unmodified ST HAL code already proven to work on a sibling
+board. This rules out core-level/FIFO misconfiguration as the root
+cause and shifts remaining suspicion to runtime behavior *after* this
+point — i.e., items 2 and 3 of the Step 28 plan (live single-step
+through `HAL_HCD_HC_SubmitRequest()`, or a minimal bare-metal
+channel-poke test) are now the most promising next steps, since the
+static configuration is clean.
+
+The temporary diagnostic printf's added to `stm32_hcd_adapter.c` for
+this comparison are being left in place (low-noise, one-line-per-boot,
+useful for any future re-diff) rather than reverted.

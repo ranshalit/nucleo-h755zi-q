@@ -220,6 +220,25 @@ static int adapter_init_hardware(void)
 		return -EIO;
 	}
 
+	/*
+	 * Diagnostic (usb_debug.md Step 28, plan item 1): dump the OTG core's
+	 * AHB config and FIFO RAM partitioning right after USB_HostInit()
+	 * programs them, for a bit-for-bit diff against the equivalent
+	 * Device-mode registers captured from the known-working Step 26
+	 * cdc_acm firmware. FIFO RAM is a small fixed shared pool on this
+	 * core; a bad RX/NPTX/PTX split is a classic silent-failure mode
+	 * (malformed/truncated transfers, no HAL error) that would match our
+	 * SETUP-stage STALL symptom.
+	 */
+	printf("usbhost: GAHBCFG=0x%08lx GRXFSIZ=0x%08lx HNPTXFSIZ=0x%08lx "
+	       "HPTXFSIZ=0x%08lx HCFG=0x%08lx\n",
+	       (unsigned long)hcd_handle.Instance->GAHBCFG,
+	       (unsigned long)hcd_handle.Instance->GRXFSIZ,
+	       (unsigned long)hcd_handle.Instance->DIEPTXF0_HNPTXFSIZ,
+	       (unsigned long)hcd_handle.Instance->HPTXFSIZ,
+	       (unsigned long)((USB_OTG_HostTypeDef *)((uintptr_t)hcd_handle.Instance +
+							USB_OTG_HOST_BASE))->HCFG);
+
 	hcd_handle.State = HAL_HCD_STATE_READY;
 
 	IRQ_CONNECT(STM32_HCD_IRQ, STM32_HCD_IRQ_PRI, stm32_hcd_isr, NULL, 0);
@@ -273,8 +292,18 @@ USBH_StatusTypeDef USBH_LL_DeInit(USBH_HandleTypeDef *phost)
 USBH_StatusTypeDef USBH_LL_Start(USBH_HandleTypeDef *phost)
 {
 	HCD_HandleTypeDef *hcd = phost->pData;
+	HAL_StatusTypeDef ret = HAL_HCD_Start(hcd);
 
-	return HAL_HCD_Start(hcd) == HAL_OK ? USBH_OK : USBH_FAIL;
+	/*
+	 * Diagnostic (usb_debug.md Step 28, plan item 1): dump GAHBCFG after
+	 * HAL_HCD_Start() for a fair, same-lifecycle-stage comparison against
+	 * the Device-mode GAHBCFG dump taken right after usb_enable() there.
+	 */
+	printf("usbhost: after HAL_HCD_Start GAHBCFG=0x%08lx GUSBCFG=0x%08lx\n",
+	       (unsigned long)hcd->Instance->GAHBCFG,
+	       (unsigned long)hcd->Instance->GUSBCFG);
+
+	return ret == HAL_OK ? USBH_OK : USBH_FAIL;
 }
 
 USBH_StatusTypeDef USBH_LL_Stop(USBH_HandleTypeDef *phost)
