@@ -26,6 +26,7 @@ const uint8_t board_http_index_html[] =
     "        <span id=\"live-indicator\" class=\"badge\" data-tone=\"muted\">starting</span>\n"
     "        <button id=\"refresh-button\" class=\"primary-button\" type=\"button\">Refresh now</button>\n"
     "        <p id=\"last-updated\" class=\"timestamp\">Waiting for first update...</p>\n"
+    "        <p class=\"timestamp\"><a href=\"http://192.168.55.2:8081/\">Live camera stream (open in VLC)</a></p>\n"
     "      </div>\n"
     "    </header>\n"
     "\n"

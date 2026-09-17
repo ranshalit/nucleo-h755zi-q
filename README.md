@@ -289,6 +289,33 @@ can change again on their own because of the background blink threads.
 `scripts/flash_zephyr_hello_shell.sh` now validates the HTTP endpoints in
 addition to the existing boot, shell, and Ethernet checks.
 
+### Camera stream (looping MJPEG)
+
+The board also serves a short, looping video clip as a `multipart/x-mixed-replace`
+MJPEG stream on a dedicated TCP port, isolated from the port-80 HTTP
+dashboard so viewing the stream never blocks LED/board-IO requests:
+
+- stream URL: `http://192.168.55.2:8081/`
+
+Open that URL directly in VLC (`Media > Open Network Stream`) or with
+`ffplay http://192.168.55.2:8081/` to view the loop. A convenience link is
+also shown on the dashboard (`http://192.168.55.2/`).
+
+The frame data comes from `apps/zephyr-hello-shell/src/camera_frames.c`,
+generated offline from a source video with:
+
+```bash
+python3 scripts/convert_video_to_mjpeg_frames.py \
+  --input ~/Downloads/videoplayback.mp4 \
+  --output-dir apps/zephyr-hello-shell/src \
+  --width 320 --height 240 --fps 8 --duration 6 --start 0 \
+  --jpeg-quality 6 --flash-budget-bytes 524288 --var-prefix camera_frame
+```
+
+Re-run this command (and rebuild/reflash) to change the clip. The script
+fails with a clear error if the encoded frame data would exceed the
+`--flash-budget-bytes` limit.
+
 ## STM32CubeIDE reference build
 
 The verified STM32Cube reference baseline is vendored under:
