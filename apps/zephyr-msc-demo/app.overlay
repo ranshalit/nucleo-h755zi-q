@@ -1,0 +1,15 @@
+/*
+ * Copyright (c) 2026 Ran Shalit
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * In-RAM disk backing store for the USB mass storage demo.
+ */
+
+/ {
+	ramdisk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "RAM";
+		sector-size = <512>;
+		sector-count = <256>;
+	};
+};

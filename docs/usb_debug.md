@@ -3245,3 +3245,36 @@ correctly with both real bugs fixed, but the loopback demo does not
 audibly work. The two driver fixes (MPS-cap workaround via mono/24kHz
 config, and the `Sof_enable` wiring in `udc_stm32.c`) are kept as genuine
 improvements regardless of the demo's outcome.
+
+## Step 45: USB Mass Storage demo — works cleanly, confirms bulk-only is the safe path
+
+Given both isochronous device-mode (UAC2) and USB host mode remain broken
+with the same suspected shared root cause (Step 44), built a USB Mass
+Storage (MSC) demo instead: exposes a small in-RAM FAT-formatted disk as a
+plain USB flash drive, using only bulk endpoints (control + bulk IN/OUT),
+no isochronous transfers at all.
+
+New app: `apps/zephyr-msc-demo/` — modern USBD stack
+(`CONFIG_USB_DEVICE_STACK_NEXT` + `CONFIG_USBD_MSC_CLASS`), a 128KB
+`zephyr,ram-disk` devicetree node, FatFS (`CONFIG_FAT_FILESYSTEM_ELM`,
+`CONFIG_FILE_SYSTEM_MKFS=y` for auto-format-on-first-boot), and a
+`README.TXT` written to the disk at boot for a visible "it's alive" marker.
+
+**Result: works cleanly, end to end.**
+- Enumerates as `2fe3:0009 ... STM32H7 Playground MSC Demo`.
+- Host sees it as a real block device (`/dev/sdb`, 128K vfat).
+- Mounted, read `README.TXT` back correctly.
+- Wrote a new file from the host (`HOST.TXT`), confirmed content persisted
+  and was byte-correct.
+
+This confirms the earlier hypothesis: bulk-endpoint device-mode transfers
+(already proven via CDC-ACM, Step 43, now again via MSC) are fully
+reliable on this board under Zephyr. The failure mode is specific to
+isochronous/periodic transfers (UAC2 device-mode OUT stream, and the
+original USB host-mode enumeration path), not USB device mode as a whole.
+
+**Practical takeaway for future demos on this board**: any USB device-mode
+class built on bulk or control transfers (MSC, CDC-ACM, HID, DFU, custom
+vendor bulk protocols) is safe to build on. Isochronous classes (UAC/UVC)
+and USB host mode remain blocked pending the still-unidentified DWC2/UDC
+periodic-transfer gap.
