@@ -3063,3 +3063,44 @@ the device's timeout window is still unknown).
 - Wording correction: replace "hardware TXERR" framing going forward
   with "hardware-reported transaction-timeout symptom, root cause
   still Zephyr-environment-side."
+
+## Step 41: Clarified device-mode CDC-ACM success is not "software stack" vs hardware
+
+User asked whether the working Step 26 Device-mode CDC-ACM test means
+Zephyr was "using the USB stack in software" (implying Host mode
+somehow uses a different, less-proven hardware path).
+
+### Finding
+
+Both directions use the identical DWC2 hardware core via the same
+architectural pattern — an interrupt-driven ST HAL bridge, not a
+bit-banged/software-emulated protocol:
+
+- Device mode (Step 26 test): `CONFIG_USB_DEVICE_STACK=y` (legacy
+  Zephyr USB device stack) uses `drivers/usb/device/usb_dc_stm32.c`,
+  which wraps ST's `HAL_PCD_*` API (`HAL_PCD_Init`,
+  `HAL_PCD_IRQHandler`), interrupt-driven, DMA disabled.
+- Host mode (ours): `stm32_hcd_adapter.c` wraps ST's `HAL_HCD_*` API
+  (`HAL_HCD_Init`, `HAL_HCD_IRQHandler`), same interrupt-driven
+  pattern, same DMA-disabled slave/FIFO mode.
+
+Both run under the identical Zephyr scheduler/thread/NVIC
+environment. There is no "software vs. hardware" distinction between
+them — same silicon, same HAL family (PCD/HCD are sibling APIs over
+the same DWC2 core), same servicing style.
+
+### Implication
+
+The Step 26 success proves Zephyr's runtime environment can meet
+real-time USB transaction timing on this exact hardware — it is not
+a blanket "Zephyr's scheduler is too slow for USB" problem. This
+narrows suspicion specifically onto the **host-role (HCD) code path**
+— channel/FIFO configuration, SETUP-transaction sequencing, or
+something host-role-specific in `stm32_hcd_adapter.c` or ST's HCD HAL
+layer — rather than the Zephyr environment in general.
+
+- New concrete next step: diff `stm32_hcd_adapter.c`'s FIFO/channel
+  setup (`HCTSIZ`, `HCCHAR`, `GRXFSIZ`/`GNPTXFSIZ`/`HPTXFSIZ`
+  allocation) against `usb_dc_stm32.c`'s equivalent device-mode FIFO
+  setup, since the device-mode path is proven working on this silicon
+  under Zephyr.
