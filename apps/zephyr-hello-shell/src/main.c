@@ -9,6 +9,7 @@
 #include <zephyr/shell/shell.h>
 
 #include "board_io.h"
+#include "camera_stream.h"
 #include "http_server.h"
 
 extern int board_usb_host_start(void);
@@ -166,6 +167,15 @@ int main(void)
 	if (ret != 0) {
 		printf("USB host startup failed: %d\n", ret);
 		/* Non-fatal: continue running LEDs/HTTP even if USB host init failed. */
+	}
+
+	ret = camera_stream_start();
+	if (ret != 0) {
+		printf("Camera stream startup failed: %d\n", ret);
+		/* Non-fatal: continue running LEDs/HTTP even if the stream failed. */
+	} else {
+		printf("Camera stream listening on http://%s:%u/\n",
+		       CONFIG_NET_CONFIG_MY_IPV4_ADDR, camera_stream_port());
 	}
 
 	return 0;
