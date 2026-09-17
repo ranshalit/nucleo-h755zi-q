@@ -28,6 +28,7 @@ LOG_MODULE_REGISTER(camera_stream, LOG_LEVEL_INF);
 #define CAMERA_STREAM_THREAD_PRIORITY 7
 #define CAMERA_STREAM_FRAME_INTERVAL_MS 125 /* ~8 fps */
 #define CAMERA_STREAM_HEADER_BUF_SIZE 128
+#define CAMERA_STREAM_CLIENT_TIMEOUT_SEC 5
 
 K_THREAD_STACK_DEFINE(camera_stream_thread_stack, CAMERA_STREAM_THREAD_STACK_SIZE);
 static struct k_thread camera_stream_thread_data;
@@ -153,6 +154,23 @@ static void camera_stream_thread_entry(void *p1, void *p2, void *p3)
 			k_sleep(K_MSEC(500));
 			continue;
 		}
+
+		/* Bound how long a single send()/recv() can block. Without
+		 * this, a client that stops reading (network drop, killed
+		 * process, etc.) without a clean FIN/RST can wedge this
+		 * thread's blocking send() forever, holding onto in-flight
+		 * frame data and starving the network buffer pool that the
+		 * port-80 dashboard thread also depends on.
+		 */
+		struct zsock_timeval client_timeout = {
+			.tv_sec = CAMERA_STREAM_CLIENT_TIMEOUT_SEC,
+			.tv_usec = 0,
+		};
+
+		(void)zsock_setsockopt(client_sock, SOL_SOCKET, SO_SNDTIMEO, &client_timeout,
+				       sizeof(client_timeout));
+		(void)zsock_setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &client_timeout,
+				       sizeof(client_timeout));
 
 		LOG_INF("Camera stream client connected");
 		camera_stream_serve_client(client_sock);
