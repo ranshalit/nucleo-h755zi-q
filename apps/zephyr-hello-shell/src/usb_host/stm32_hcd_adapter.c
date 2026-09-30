@@ -524,18 +524,29 @@ void USBH_Delay(uint32_t delay)
 	k_msleep(delay);
 }
 
+static HCD_URBStateTypeDef raw_wait_for_urb(uint8_t ch, uint32_t timeout_us)
+{
+	HCD_URBStateTypeDef state;
+
+	for (uint32_t elapsed = 0; elapsed < timeout_us; elapsed++) {
+		HAL_HCD_IRQHandler(&hcd_handle);
+		state = HAL_HCD_HC_GetURBState(&hcd_handle, ch);
+		if (state == URB_DONE || state == URB_ERROR || state == URB_STALL) {
+			return state;
+		}
+		k_busy_wait(1);
+	}
+
+	return HAL_HCD_HC_GetURBState(&hcd_handle, ch);
+}
+
 int stm32_hcd_adapter_raw_control_test(void)
 {
 	static uint8_t setup_pkt[8] __aligned(4) = {
-		0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00,
-	}; /* GET_DESCRIPTOR(DEVICE), wLength=64, bmRequestType=IN */
-	/*
-	 * Use channel 1, not 0: ST's USBH middleware's own control pipe
-	 * already occupies channel 0 and keeps retrying in the background
-	 * (usb_host_poll_loop() -> USBH_Process()), which would corrupt this
-	 * test's results if both drove the same channel concurrently.
-	 */
-	uint8_t ch = 1;
+		0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x08, 0x00,
+	}; /* GET_DESCRIPTOR(DEVICE), wLength=8, bmRequestType=IN */
+	static uint8_t device_desc[8] __aligned(4);
+	uint8_t ch = 0;
 	HCD_HCTypeDef *hc = &hcd_handle.hc[ch];
 	USB_OTG_GlobalTypeDef *USBx = hcd_handle.Instance;
 	uint32_t USBx_BASE = (uint32_t)USBx;
@@ -657,35 +668,6 @@ int stm32_hcd_adapter_raw_control_test(void)
 		printf("rawtest: FRNUM tight busy-poll over ~5ms (no k_msleep): first=%u last=%u "
 		       "changed=%d times\n",
 		       frnum3_first, frnum3_last, frnum3_changed);
-
-		/*
-		 * Experiment: bare-metal reference never re-enters the
-		 * HPRT PENCHNG interrupt path that HAL's USB_InitFSLSPClkSel()
-		 * uses to rewrite HFIR to 48000; it stays at the silicon
-		 * reset default of 60000 and SOF/FRNUM cadence is correct
-		 * (~1ms) there. Force HFIR back to 60000 here and re-sweep
-		 * FRNUM to test whether the 48000 value (or the act of
-		 * dynamically rewriting HFIR) is what stalls the SOF/frame
-		 * scheduler under Zephyr.
-		 */
-		host_regs->HFIR = 60000U;
-		uint16_t frnum2_first = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
-		uint16_t frnum2_last = frnum2_first;
-		int frnum2_changed = 0;
-
-		for (int i = 0; i < 20; i++) {
-			k_msleep(1);
-			uint16_t f = (uint16_t)(host_regs->HFNUM & 0xFFFFU);
-
-			if (f != frnum2_last) {
-				frnum2_changed++;
-			}
-			frnum2_last = f;
-		}
-		printf("rawtest: after forcing HFIR=60000: FRNUM over 20ms: first=%u last=%u "
-		       "changed=%d times (HFIR now 0x%08lx)\n",
-		       frnum2_first, frnum2_last, frnum2_changed,
-		       (unsigned long)host_regs->HFIR);
 
 		/*
 		 * PCGCCTL (Power and Clock Gating Control) lives at offset
@@ -813,14 +795,6 @@ int stm32_hcd_adapter_raw_control_test(void)
 	printf("rawtest: HCCHAR(ch0) after halt = 0x%08lx\n",
 	       (unsigned long)USBx_HC(0)->HCCHAR);
 
-	/*
-	 * Experiment: gate Ethernet's AHB clocks off across the whole
-	 * channel-init-through-transfer window (not just the earlier SOF
-	 * probe) to test whether Ethernet MAC/DMA AHB traffic is stalling
-	 * the OTG core's FIFO fetch during the actual SETUP transmission,
-	 * which the earlier SOF-only test (a trivial 1-bit event, no FIFO
-	 * access) would not have exercised.
-	 */
 	hc->dev_addr = 0;
 	hc->ch_num = ch;
 	hc->ep_num = 0;
@@ -836,6 +810,10 @@ int stm32_hcd_adapter_raw_control_test(void)
 	hc->xfer_len = sizeof(setup_pkt);
 	hc->toggle_in = 0;
 	hc->toggle_out = 0;
+	hc->urb_state = URB_IDLE;
+	hc->state = HC_IDLE;
+	hc->ErrCnt = 0;
+	hc->xfer_count = 0;
 
 	ret = USB_HC_Init(USBx, ch, 0, 0, hc->speed, EP_TYPE_CTRL, 64);
 	printf("rawtest: USB_HC_Init -> %d HCCHAR=0x%08lx HCINTMSK=0x%08lx\n",
@@ -955,6 +933,7 @@ int stm32_hcd_adapter_raw_control_test(void)
 		}
 	}
 
+	bool setup_completed = false;
 	for (int i = 0; i < 100; i++) {
 		uint32_t hcint = USBx_HC(ch)->HCINT;
 		uint32_t hcchar = USBx_HC(ch)->HCCHAR;
@@ -968,14 +947,64 @@ int stm32_hcd_adapter_raw_control_test(void)
 
 		if (hcint != 0U) {
 			printf("rawtest: HCINT went non-zero after %d polls, stopping\n", i);
+			setup_completed = (hcint & USB_OTG_HCINT_XFRC) != 0U;
 			break;
 		}
 		k_msleep(2);
 	}
 
+	HCD_URBStateTypeDef setup_urb = URB_ERROR;
+	HCD_URBStateTypeDef data_urb = URB_IDLE;
+	HCD_URBStateTypeDef status_urb = URB_IDLE;
+	uint32_t data_count = 0;
+	HAL_StatusTypeDef data_submit = HAL_ERROR;
+	HAL_StatusTypeDef status_submit = HAL_ERROR;
+
+	if (setup_completed) {
+		setup_urb = raw_wait_for_urb(ch, 200000U);
+	}
+
+	if (setup_urb == URB_DONE) {
+		memset(device_desc, 0, sizeof(device_desc));
+		ret = HAL_HCD_HC_Init(&hcd_handle, ch, 0x80U, 0, hc->speed,
+				      EP_TYPE_CTRL, 64);
+		if (ret == HAL_OK) {
+			hcd_handle.hc[ch].toggle_in = 1U;
+			data_submit = HAL_HCD_HC_SubmitRequest(
+				&hcd_handle, ch, 1U, EP_TYPE_CTRL, USBH_PID_DATA,
+				device_desc, sizeof(device_desc), 0U);
+			if (data_submit == HAL_OK) {
+				data_urb = raw_wait_for_urb(ch, 200000U);
+				data_count = HAL_HCD_HC_GetXferCount(&hcd_handle, ch);
+			}
+		}
+	}
+
+	if (data_urb == URB_DONE) {
+		ret = HAL_HCD_HC_Init(&hcd_handle, ch, 0x00U, 0, hc->speed,
+				      EP_TYPE_CTRL, 64);
+		if (ret == HAL_OK) {
+			hcd_handle.hc[ch].toggle_out = 1U;
+			status_submit = HAL_HCD_HC_SubmitRequest(
+				&hcd_handle, ch, 0U, EP_TYPE_CTRL, USBH_PID_DATA,
+				NULL, 0U, 0U);
+			if (status_submit == HAL_OK) {
+				status_urb = raw_wait_for_urb(ch, 200000U);
+			}
+		}
+	}
+
 	irq_enable(STM32_HCD_IRQ);
+	printf("rawtest: control stages setup_urb=%d data_submit=%d data_urb=%d "
+	       "data_count=%lu status_submit=%d status_urb=%d\n",
+	       setup_urb, data_submit, data_urb, (unsigned long)data_count,
+	       status_submit, status_urb);
+	printf("rawtest: device descriptor[0:8] = "
+	       "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+	       device_desc[0], device_desc[1], device_desc[2], device_desc[3],
+	       device_desc[4], device_desc[5], device_desc[6], device_desc[7]);
 	printf("rawtest: done\n");
-	return 0;
+	return status_urb == URB_DONE ? 0 : -EIO;
 }
 
 /*

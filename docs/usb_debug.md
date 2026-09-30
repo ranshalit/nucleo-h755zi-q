@@ -3297,3 +3297,485 @@ Verified all four simultaneously on one flashed image:
 `apps/zephyr-msc-demo/` is now the full-featured board demo app going
 forward; `apps/zephyr-hello-shell` remains as-is for USB host-mode
 experiments only.
+
+## Step 47: Low-speed mouse test isolates the remaining failure to the production USBH path
+
+Rebuilt and flashed the host-enabled `apps/zephyr-hello-shell` image,
+then tested a basic USB mouse in place of the camera. The mouse was
+detected as a low-speed device:
+
+```text
+HPRT=0x00041805
+```
+
+`HPRT.PSPD=2` is low speed. VBUS remained present (`PA9=1`) and the
+load-switch fault input remained inactive (`PG7_nFAULT=1`). The normal
+ST USB Host middleware path completed connection and port reset, but
+failed every first EP0 SETUP transaction exactly as it did with the
+camera:
+
+```text
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+ST USBH: pipe 0 URB=4 HC_state=2 HCINT=0x00000000
+HCTSIZ=0x60080008 HCCHAR=0x20100040 HPRT=0x00041805
+ST USBH: unrecovered error
+ST USBH ERROR: Control error: Device not responding
+```
+
+No valid device descriptor was received. A hard VBUS cycle did not
+change the result.
+
+### Low-speed EP0 MPS experiment: ruled out
+
+Because the middleware initially opened the low-speed mouse's EP0 with
+the library default MPS of 64, temporarily forced the initial low-speed
+control-pipe MPS to 8. The live register confirmed the intended change:
+
+```text
+HCCHAR=0x20100008
+```
+
+The first SETUP still failed identically across repeated attempts.
+The MPS change was therefore reverted. The original MPS-64 setting is
+also not sufficient to explain the failure because the corrected raw
+HAL test below succeeds with the same mouse and MPS 64.
+
+### Rawtest contamination found and fixed
+
+The first three mouse `usbhost rawtest` runs all returned `TXERR`.
+Reviewing the test found that an obsolete diagnostic block forced:
+
+```c
+host_regs->HFIR = 60000U;
+```
+
+before the transfer. That mutation was harmless for the earlier
+full-speed camera experiment, but it overwrote the HAL's correct
+low-speed frame interval. Immediately before the overwrite, the mouse
+run showed:
+
+```text
+HFIR=0x00001770
+```
+
+which is 6000 PHY-clock cycles for a 1 ms low-speed frame. Removed the
+forced-HFIR experiment from `stm32_hcd_adapter_raw_control_test()` and
+rebuilt/reflashed.
+
+With HAL's low-speed timing left intact, all three repeated mouse
+rawtests succeeded on the first poll:
+
+```text
+rawtest: USB_HC_Init -> 0 HCCHAR=0x00100040
+rawtest: poll[00] HCINT=0x00000021 ... HCTSIZ=0x20000008
+rawtest: HCINT went non-zero after 0 polls, stopping
+```
+
+`HCINT=0x21` is `XFRC | ACK`: the mouse accepted the SETUP transaction.
+After those successful raw tests, resuming the normal middleware path
+still produced repeated `TXERR`/`Device not responding` failures and
+no descriptor.
+
+### Updated conclusion
+
+- The camera's current draw, UVC complexity, and camera-specific
+  behavior are not the cause of the production failure. A low-power
+  low-speed mouse fails at the same first EP0 SETUP stage.
+- The connector, VBUS path, D+/D- path, OTG core, low-speed clock
+  selection, and direct HAL transaction path all work with the mouse.
+- Initial low-speed EP0 MPS 64 versus 8 does not explain the production
+  failure.
+- The old rawtest HFIR mutation was a real diagnostic bug and has been
+  removed; future rawtests must not overwrite the speed-specific frame
+  interval selected by the HAL.
+- The decisive remaining comparison is now production USBH submission
+  versus the successful raw HAL submission on the same device and
+  boot. Capture the exact eight SETUP-buffer bytes/FIFO words and
+  channel registers at `USBH_LL_SubmitURB()`/`USB_HC_StartXfer()`.
+  A real USB protocol analyzer remains the strongest external check.
+
+## Step 48: Production-versus-raw SETUP trace rules out packet, FIFO, and channel configuration
+
+Added temporary tracing around production `USBH_LL_SubmitURB()` and
+the raw `USB_HC_StartXfer()` call, then tested the same low-speed mouse
+on one boot.
+
+The production first request was correct:
+
+```text
+bytes=80 06 00 01 00 00 08 00
+words=01000680,00080000
+hc{addr=0 ep=0 in=0 speed=2 type=0 mps=64 pid=3 len=8}
+after: HCCHAR=80100040 HCTSIZ=60080008 HNPTXSTS=010700fe
+```
+
+The same request means standard `GET_DESCRIPTOR(Device)`, request the
+first eight bytes, address zero, endpoint zero, SETUP PID. The two FIFO
+words are correctly little-endian packed. The raw test was changed to
+use exactly those same bytes and the same channel (`0`) rather than its
+old 64-byte request on channel `1`; it still completed first poll:
+
+```text
+rawtest: poll[00] HCINT=0x00000021 ... HCTSIZ=0x20000008
+```
+
+Repeated raw channel-0 runs succeeded 3/3 with the exact production
+packet. A later run removed the rawtest's GPIO capture/global interrupt
+lock and succeeded 5/5, so that short interrupt-masked capture window
+is not responsible for the raw success.
+
+The following production-only candidates were tested and ruled out:
+
+- **OTG ISR execution:** fresh-boot `usbhost pollmode on` disables the
+  OTG NVIC IRQ and directly services the same HAL handler in the poll
+  thread. It still failed every SETUP with the residual `CHH` state.
+- **Stale non-periodic Tx FIFO:** flushing all Tx FIFOs before every
+  production SETUP changed `HNPTXSTS` but did not produce a descriptor
+  or prevent `TXERR`.
+- **Opening both control channels:** deferring the unused IN control
+  pipe removed its early error report, but did not produce a completed
+  OUT SETUP once the IN pipe was initialized after SETUP completion.
+  This experiment was reverted.
+
+All temporary trace, FIFO-flush, and middleware-order experiments were
+reverted. The persistent rawtest corrections are intentional: it no
+longer overwrites the HAL's speed-specific `HFIR`, and its descriptor
+request/channel now exactly match production.
+
+### Updated conclusion
+
+The currently observable software state immediately before and after
+`USB_HC_StartXfer()` is equivalent in the successful raw path and the
+failing production path. The remaining difference is execution context
+outside those snapshots: the full USBH state-machine scheduling and
+concurrent system activity before the transfer. A USB protocol analyzer
+is now the most direct way to see whether the physically transmitted
+SETUP differs despite matching FIFO input. On-board software should next
+measure the exact cycle timing from port-enable through channel arm, and
+then isolate full production enumeration with the HTTP/network and
+other application threads stopped.
+
+## Step 49: Complete raw control transfer succeeds; production IRQ trace identifies SETUP TXERR
+
+Extended `usbhost rawtest` beyond its previous SETUP-only check. It now
+executes the complete first control transfer through the HAL:
+
+1. SETUP OUT: `80 06 00 01 00 00 08 00`.
+2. DATA IN: DATA1, eight bytes.
+3. STATUS OUT: DATA1, zero bytes.
+
+The OTG NVIC IRQ remains disabled during the transfer. A bounded polling
+helper calls `HAL_HCD_IRQHandler()` synchronously so the non-DMA Rx FIFO
+is drained and the HAL's normal channel state transitions still run.
+All three repeated mouse tests completed every stage:
+
+```text
+rawtest: control stages setup_urb=1 data_submit=0 data_urb=1
+data_count=8 status_submit=0 status_urb=1
+rawtest: device descriptor[0:8] = 12 01 10 01 00 00 00 08
+```
+
+`URB=1` is `URB_DONE`, and the returned bytes are a valid USB device
+descriptor prefix: length 18, device descriptor type 1, USB 1.10, EP0
+MPS 8. This proves that SETUP OUT, DATA IN, Rx FIFO handling, and STATUS
+OUT all work on the same low-speed mouse. The failure is not merely
+hidden in the raw test's previously untested DATA or STATUS stage.
+
+### Production interrupt-cause trace
+
+The existing production error dump ran after the HAL had cleared the
+meaningful channel interrupt, leaving only a halted/error state. Added a
+temporary in-RAM trace around `HAL_HCD_IRQHandler()` and printed it only
+after the middleware observed an error. Every production attempt showed
+the same sequence:
+
+```text
+SUBMIT pipe=0 dir=0 token=0 len=8
+IRQ pipe=0 HCINT=0x00000080 HCTSIZ=0x60080008 urb=0->0 hc=7
+IRQ pipe=0 HCINT=0x00000002 HCTSIZ=0x60080008 urb=0->4 hc=2
+```
+
+`HCINT=0x80` is `TXERR`; `0x02` is the subsequent channel-halted
+interrupt. `HCTSIZ` is unchanged, so production really fails during the
+SETUP transaction and never enters DATA IN. The earlier residual `CHH`
+logs were not timeouts and did not identify the original cause.
+
+### Additional timing/load experiments ruled out
+
+- Suspended both application LED blink threads before running production
+  enumeration. SETUP still failed with the identical `TXERR` sequence.
+- Added a true sub-frame phase sweep before production SETUP, cycling
+  delays from 0 through 900 us in 100 us steps. Each offset was tested
+  six or seven times; all failed with `TXERR`. The prior retry delay used
+  whole milliseconds and therefore could not test this, but the direct
+  sweep now rules out a narrow bad phase relative to SOF.
+- Reviewed `HAL_HCD_HC_Init()`: it does not reset `ErrCnt`, channel state,
+  or URB state, but those fields begin zero/idle on the first production
+  attempt and the HAL clears `ErrCnt` after its internal error sequence.
+  Stale software channel state does not explain the first failure.
+
+The temporary IRQ trace, LED suspension, and phase-delay sweep were
+removed after collecting the results. The complete raw control transfer
+remains as a stronger diagnostic.
+
+### Updated conclusion
+
+The low-speed mouse completes the exact three-stage descriptor request
+through the raw HAL path, while the production middleware's physically
+first SETUP attempt receives an OTG-core `TXERR` before any bytes are
+accounted as transferred. Request bytes, endpoint/channel configuration,
+FIFO contents, MPS, interrupt-versus-poll servicing, LED load, and all
+sub-frame launch phases tested so far are equivalent or ruled out.
+
+The highest-value next step is an external USB protocol analyzer or
+oscilloscope capture comparing raw and production packets on D+/D-. If
+only on-board experiments are possible, reduce the raw path and
+production path to two adjacent callable functions with an identical
+pre-transfer core state, then remove rawtest preparation steps one at a
+time. In particular, compare the effects of its long IRQ-disabled
+diagnostic preamble and explicit channel halt/reset history; register
+snapshots alone have not exposed their difference.
+
+## Step 50: Full-speed SanDisk Cruzer reproduces the production-only failure
+
+Replaced the low-speed mouse with a simple SanDisk Cruzer USB flash
+drive. The host detected it as full speed:
+
+```text
+HPRT=0x00021405
+```
+
+Normal middleware enumeration repeatedly completed connection and port
+reset, then failed the first control SETUP exactly like the low-speed
+mouse and the camera:
+
+```text
+ST USBH: pipe 0 URB=4 HC_state=2
+HCTSIZ=0x60080008 HCCHAR=0x20100040 HPRT=0x00021405
+ST USBH ERROR: Control error: Device not responding
+```
+
+The complete raw control test then succeeded on the same Cruzer:
+
+```text
+rawtest: HCINT=0x00000021
+rawtest: control stages setup_urb=1 data_submit=0 data_urb=1
+data_count=8 status_submit=0 status_urb=1
+rawtest: device descriptor[0:8] = 12 01 00 02 00 00 00 40
+```
+
+The returned prefix is a valid USB 2.0 device descriptor with EP0 MPS
+64. Therefore the raw path now succeeds with both a low-speed mouse and
+a full-speed mass-storage device, while production fails identically
+with both.
+
+This substantially rules out device class, low-speed-specific timing,
+mouse/camera behavior, and insufficient device power as the root cause.
+The Cruzer also keeps `PA9=1` and `PG7_nFAULT=1`; more importantly, it
+completes the full raw transaction under the same supply and board load.
+The remaining defect is specific to production-path preparation or
+execution context before the first SETUP.
+
+One diagnostic also reported `FLASH->OPTSR_CUR.BCM4=1`, meaning CM4
+auto-boot was enabled. Step 51 repeated the CM4-disabled test with the
+Cruzer and again found no change in the production failure.
+
+## Step 51: Repeated CM4-disabled test with Cruzer; left CM4 boot disabled
+
+At the user's request, repeated the earlier Step 35 CM4 isolation test
+with the full-speed Cruzer. Readback first confirmed the starting state
+was `BCM4=1`, then programmed the option byte and reset:
+
+```text
+BCM4 : 0x0 (CM4 boot disabled)
+BCM7 : 0x1 (CM7 boot enabled)
+```
+
+No firmware rebuild was required; `BCM4` is a nonvolatile option byte,
+not part of the CM7 Zephyr image. After allowing the CM7-only boot to
+complete, the full application initialized normally, including GPIO,
+Ethernet, HTTP, and USB host:
+
+```text
+Hello World! nucleo_h755zi_q/stm32h755xx/m7
+usbhost: hardware ready
+Camera stream listening on http://192.168.55.2:8081/
+```
+
+Production Cruzer enumeration still failed repeatedly at the same first
+SETUP:
+
+```text
+ST USBH: pipe 0 URB=4 HC_state=2
+HCTSIZ=0x60080008 HCCHAR=0x20100040 HPRT=0x00021405
+ST USBH ERROR: Control error: Device not responding
+```
+
+The complete raw Cruzer transfer also succeeded while live diagnostics
+reported `BCM4=0`, returning the same valid descriptor prefix:
+
+```text
+rawtest: control stages setup_urb=1 data_urb=1 data_count=8 status_urb=1
+rawtest: device descriptor[0:8] = 12 01 00 02 00 00 00 40
+```
+
+This independently reconfirms that CM4 execution is not causing the USB
+failure. Unlike Step 35, this session intentionally left `BCM4=0`
+because the application does not use CM4. Final option-byte readback
+confirmed CM4 boot disabled, and the USB retry loop was paused.
+
+## Step 52: Root cause found — 1 ms USBH processing cadence is too slow
+
+Reduced the successful raw path toward production one difference at a
+time using the full-speed Cruzer. The complete raw control transfer
+continued to succeed after removing each of these raw-only behaviors:
+
+- the long IRQ-disabled diagnostic preamble;
+- the explicit non-periodic Tx FIFO flush;
+- the explicit channel halt;
+- manual clearing of the HAL channel state;
+- direct LL submission instead of `HAL_HCD_HC_Init()` and
+  `HAL_HCD_HC_SubmitRequest()`.
+
+The successful raw test also worked immediately after a production
+failure without performing another port reset. None of those setup or
+register-state differences caused the production failure.
+
+The remaining architectural difference was call cadence. The Zephyr
+host thread called `USBH_Process()` once per millisecond, while ST's
+reference superloop and the raw transfer advance state continuously.
+As a RED hardware test, changed only the enumeration state to call
+`USBH_Process()` every approximately 10 us. This immediately completed
+all descriptor control requests:
+
+```text
+ST USBH: PID: 5406h
+ST USBH: VID: 781h
+ST USBH: Address (#1) assigned.
+ST USBH: Manufacturer : SanDisk
+ST USBH: Product : U3 Cruzer Micro
+ST USBH: Serial Number : 0877631638107AB2
+ST USBH: Enumeration done.
+```
+
+The next `SET_CONFIGURATION` request initially failed because that
+top-level state returned to the old 1 ms period. The production fix now
+uses fast polling for all host states that initiate control requests
+(`HOST_ENUMERATION`, `HOST_SET_CONFIGURATION`,
+`HOST_SET_WAKEUP_FEATURE`, and `HOST_CLASS_REQUEST`) and while the
+control state machine is otherwise active.
+
+An unbounded fast loop starved Zephyr's lower-priority UART shell
+thread. The final implementation therefore runs at most 99 iterations
+spaced by 10 us, then sleeps for 1 ms to give other threads CPU time.
+Paused mode always sleeps.
+
+Fresh hardware validation with `BCM4=0` repeatedly completed:
+
+```text
+ST USBH: Enumeration done.
+ST USBH: Default configuration set.
+ST USBH: enumeration complete; no class driver registered
+```
+
+No `Device not responding` or control-transfer error occurred during
+the validated run. The repeated disconnect/re-enumerate cycle afterward
+is expected from this diagnostic application's explicit
+`HOST_ABORT_STATE` transition when no USB class driver is registered;
+it is separate from the fixed control-transfer failure.
+
+### Updated conclusion
+
+The USB electrical path, OTG core, HAL, and interrupt servicing were
+working. The defect was the integration's fixed 1 ms
+`USBH_Process()` scheduling interval. ST's middleware requires its
+control state machine to be advanced more promptly between stages on
+this target. Bounded fast processing fixes enumeration and
+configuration while retaining scheduler fairness.
+
+## Step 53: Camera still fails below middleware; raw SETUP succeeds only 1/5
+
+Reconnected the HP camera after validating the bounded fast-processing
+fix with the Cruzer. Unlike the Cruzer, the camera did not complete
+production enumeration. The failure included both the control OUT pipe
+and DATA IN pipe:
+
+```text
+pipe 0 URB=4 HCTSIZ=0x60080008 HCCHAR=0x20100040
+pipe 1 URB=4 HCTSIZ=0x40080040 HCCHAR=0x20108040
+HPRT=0x00021405 PA9=1 PG7_nFAULT=1
+```
+
+The complete raw test sometimes transferred SETUP and the first eight
+descriptor bytes:
+
+```text
+12 01 00 02 ef 02 01 40
+```
+
+This identifies a USB 2.0 composite/IAD device with EP0 MPS 64. Later
+production progress also identified it as HP `VID=03f0`, `PID=664a`.
+However, that raw run remained `URB_IDLE` at STATUS OUT.
+
+After a genuine 2-second VBUS power cycle, five paused raw trials gave:
+
+- four SETUP failures, normally immediate `HCINT=0x80` (`TXERR`);
+- one successful SETUP plus eight-byte DATA IN, followed by STATUS OUT
+  remaining idle;
+- zero complete three-stage control transfers.
+
+The Cruzer repeatedly completes enumeration and `SET_CONFIGURATION`
+using the same final firmware, cable/connector, host controller, and
+bounded USBH processing. The camera therefore has an additional issue
+below the middleware cadence fix. Its intermittent raw SETUP failure
+points toward camera power integrity, signal integrity, or device-side
+state rather than ST USBH state-machine scheduling.
+
+`PA9=1` and `PG7_nFAULT=1` rule out sustained VBUS loss/overcurrent but
+cannot detect a short VBUS droop. The board's stated 5 V / 0.6 A input
+is also much more plausible as a limitation for a webcam than for the
+Cruzer or mouse. The next decisive A/B test is the same camera through
+a self-powered USB 2.0 hub, or with a stronger regulated 5 V supply,
+while keeping the current firmware unchanged.
+
+## Step 54: External 5 V supply does not improve camera reliability
+
+Retested the reconnected HP camera after powering the board from the
+external 5 V supply, without changing or rebuilding firmware. ST-LINK
+was initially disconnected from the host; after reconnecting its USB
+cable, both the UART and SWD probe were detected normally.
+
+On a fresh hardware reset, production detected and reset the full-speed
+camera and opened both EP0 pipes, but did not complete the first
+descriptor request within the 20-second observation window:
+
+```text
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0
+```
+
+Five paused raw control trials then produced almost the same distribution
+as Step 53:
+
+- one trial completed SETUP and eight-byte DATA IN, then remained
+  `URB_IDLE` at STATUS OUT;
+- four trials failed SETUP immediately with `HCINT=0x80` (`TXERR`);
+- zero trials completed all three control stages.
+
+Representative results:
+
+```text
+setup_urb=1 data_urb=1 data_count=8 status_urb=2
+setup_urb=4 data_urb=0 data_count=0 status_urb=0
+```
+
+The stronger/external board supply therefore did not measurably improve
+camera behavior. Ordinary board-input power limitation is no longer the
+leading explanation. A self-powered USB hub would still test whether
+isolating the camera's VBUS locally changes anything, but current
+evidence points more strongly toward camera/cable signal integrity,
+device-specific transaction behavior, or an OTG electrical/timing
+interaction that the Cruzer does not trigger.

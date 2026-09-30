@@ -81,6 +81,20 @@ static const char *control_state_name(CTRL_StateTypeDef state)
 	}
 }
 
+static bool usb_host_needs_fast_poll(void)
+{
+	switch (usb_host.gState) {
+	case HOST_ENUMERATION:
+	case HOST_SET_CONFIGURATION:
+	case HOST_SET_WAKEUP_FEATURE:
+	case HOST_CLASS_REQUEST:
+		return true;
+	default:
+		return usb_host.Control.state != CTRL_IDLE &&
+		       usb_host.Control.state != CTRL_COMPLETE;
+	}
+}
+
 static void usb_host_user_process(USBH_HandleTypeDef *phost, uint8_t id)
 {
 	ARG_UNUSED(phost);
@@ -102,12 +116,16 @@ static void usb_host_user_process(USBH_HandleTypeDef *phost, uint8_t id)
 
 static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 {
+	uint8_t fast_poll_count = 0;
+
 	ARG_UNUSED(arg1);
 	ARG_UNUSED(arg2);
 	ARG_UNUSED(arg3);
 
 	while (true) {
-		if (!atomic_get(&usb_host_poll_paused)) {
+		bool running = !atomic_get(&usb_host_poll_paused);
+
+		if (running) {
 			/*
 			 * Step 38: in poll mode, service the OTG_FS controller
 			 * synchronously right before USBH_Process() instead of
@@ -130,21 +148,19 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 			}
 		}
 		/*
-		 * Tried replacing this with k_yield() to mimic ST's
-		 * bare-metal reference (which busy-loops USBH_Process() with
-		 * zero delay) -- reverted. k_yield() only cedes the CPU to
-		 * other threads at the SAME OR HIGHER priority; it never lets
-		 * a strictly lower-priority thread run. This thread runs at
-		 * priority USB_HOST_POLL_THREAD_PRIORITY (7), while the shell
-		 * backend thread runs at Zephyr's default (much lower/higher-
-		 * numbered, i.e. lower priority) preemptive priority. Result:
-		 * this thread never yielded to the shell at all and the
-		 * console went completely silent (board stayed otherwise
-		 * alive -- HTTP/LEDs kept working) while it ran. k_msleep(1)
-		 * is the correct approach here; it actually blocks and lets
-		 * lower-priority threads run too.
+		 * ST's USBH state machine needs multiple control-transfer
+		 * steps serviced faster than a 1 ms thread period. Run short
+		 * 10 us-spaced bursts while a control request is active, but
+		 * sleep after 99 iterations so this priority-7 thread does
+		 * not starve the lower-priority shell and application threads.
 		 */
-		k_msleep(USB_HOST_POLL_PERIOD_MS);
+		if (running && usb_host_needs_fast_poll() &&
+		    ++fast_poll_count < 100U) {
+			k_busy_wait(10);
+		} else {
+			fast_poll_count = 0;
+			k_msleep(USB_HOST_POLL_PERIOD_MS);
+		}
 	}
 }
 

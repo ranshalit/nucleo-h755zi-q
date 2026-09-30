@@ -16,11 +16,10 @@ uint32_t stm32_hcd_adapter_port_status(void);
 /*
  * usb_debug.md Step 30 (plan item 3): minimal bare-metal control-transfer
  * test. Bypasses ST's USBH middleware and its class/enumeration state
- * machine entirely, calling the low-level HAL LL_USB channel primitives
- * (USB_HC_Init/USB_HC_StartXfer) directly to submit a single hand-crafted
- * GET_DESCRIPTOR(DEVICE) SETUP packet to address 0, endpoint 0. Isolates
- * whether the STALL/no-response symptom is a HAL/hardware-level behavior
- * or specific to the middleware's state machine/URB handling.
+ * machine entirely. Submits a hand-crafted GET_DESCRIPTOR(DEVICE)
+ * control transfer to address 0, endpoint 0: SETUP OUT, eight-byte DATA
+ * IN, and zero-length STATUS OUT. Isolates whether the no-response
+ * symptom is a HAL/hardware-level behavior or specific to middleware.
  */
 int stm32_hcd_adapter_raw_control_test(void);
 
