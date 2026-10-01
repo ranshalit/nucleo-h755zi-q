@@ -25,6 +25,33 @@
 
 static HCD_HandleTypeDef hcd_handle;
 static bool hcd_poll_mode;
+static uint32_t mouse_irq_counts[16];
+static uint32_t mouse_last_irq;
+static uint32_t mouse_last_frame;
+static uint32_t mouse_first_irq[5];
+
+static void record_mouse_irq(void)
+{
+	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
+	uint32_t irq = USBx_HC(2)->HCINT & USBx_HC(2)->HCINTMSK;
+
+	if (irq != 0U) {
+		if (mouse_first_irq[0] == 0U) {
+			mouse_first_irq[0] = irq;
+			mouse_first_irq[1] = USBx_HOST->HFNUM;
+			mouse_first_irq[2] = USBx_HC(2)->HCCHAR;
+			mouse_first_irq[3] = USBx_HC(2)->HCTSIZ;
+			mouse_first_irq[4] = USBx_HC(2)->HCINTMSK;
+		}
+		mouse_last_irq = irq;
+		mouse_last_frame = USBx_HOST->HFNUM;
+		for (uint8_t bit = 0; bit < 16; ++bit) {
+			if ((irq & (1U << bit)) != 0U) {
+				mouse_irq_counts[bit]++;
+			}
+		}
+	}
+}
 
 void HAL_HCD_Connect_Callback(HCD_HandleTypeDef *hhcd)
 {
@@ -64,6 +91,7 @@ void HAL_HCD_SOF_Callback(HCD_HandleTypeDef *hhcd)
 static void stm32_hcd_isr(const void *arg)
 {
 	ARG_UNUSED(arg);
+	record_mouse_irq();
 	HAL_HCD_IRQHandler(&hcd_handle);
 }
 
@@ -417,8 +445,7 @@ USBH_StatusTypeDef USBH_LL_SubmitURB(USBH_HandleTypeDef *phost, uint8_t pipe,
 	}
 
 	return HAL_HCD_HC_SubmitRequest(hcd, pipe, direction, ep_type, token,
-					buffer, length, do_ping) == HAL_OK ?
-		       USBH_OK : USBH_FAIL;
+					buffer, length, do_ping) == HAL_OK ? USBH_OK : USBH_FAIL;
 }
 
 static void adapter_dump_channel(uint8_t pipe, HCD_URBStateTypeDef state)
@@ -435,6 +462,45 @@ static void adapter_dump_channel(uint8_t pipe, HCD_URBStateTypeDef state)
 	       (unsigned long)stm32_hcd_adapter_port_status(),
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9),
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOG, LL_GPIO_PIN_7));
+}
+
+void stm32_hcd_adapter_debug_channels(void)
+{
+	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
+	USB_OTG_HostTypeDef *host = USBx_HOST;
+
+	printf("core: gintsts=%08lx gintmsk=%08lx haint=%08lx "
+	       "haintmsk=%08lx hcfg=%08lx hfir=%08lx hfnum=%08lx\n",
+	       (unsigned long)hcd_handle.Instance->GINTSTS,
+	       (unsigned long)hcd_handle.Instance->GINTMSK,
+	       (unsigned long)host->HAINT, (unsigned long)host->HAINTMSK,
+	       (unsigned long)host->HCFG, (unsigned long)host->HFIR,
+	       (unsigned long)host->HFNUM);
+
+	for (uint8_t pipe = 0; pipe < 3; ++pipe) {
+		USB_OTG_HostChannelTypeDef *ch = USBx_HC(pipe);
+		HCD_HCTypeDef *hc = &hcd_handle.hc[pipe];
+
+		printf("pipe%u: urb=%u hc=%u int=%08lx size=%08lx char=%08lx "
+		       "count=%lu len=%lu mps=%u addr=%u pid=%u toggle=%u\n",
+		       pipe, hc->urb_state, hc->state,
+		       (unsigned long)ch->HCINT, (unsigned long)ch->HCTSIZ,
+		       (unsigned long)ch->HCCHAR, (unsigned long)hc->xfer_count,
+		       (unsigned long)hc->xfer_len, hc->max_packet,
+		       hc->dev_addr, hc->data_pid, hc->toggle_in);
+	}
+	printf("mouse IRQ last=%08lx frame=%08lx flags:",
+	       (unsigned long)mouse_last_irq, (unsigned long)mouse_last_frame);
+	printf("\nmouse first IRQ=%08lx frame=%08lx char=%08lx size=%08lx mask=%08lx",
+	       (unsigned long)mouse_first_irq[0], (unsigned long)mouse_first_irq[1],
+	       (unsigned long)mouse_first_irq[2], (unsigned long)mouse_first_irq[3],
+	       (unsigned long)mouse_first_irq[4]);
+	for (uint8_t bit = 0; bit < 16; ++bit) {
+		if (mouse_irq_counts[bit] != 0U) {
+			printf(" %u=%lu", bit, (unsigned long)mouse_irq_counts[bit]);
+		}
+	}
+	printf("\n");
 }
 
 USBH_URBStateTypeDef USBH_LL_GetURBState(USBH_HandleTypeDef *phost,
@@ -522,6 +588,110 @@ uint8_t USBH_LL_GetToggle(USBH_HandleTypeDef *phost, uint8_t pipe)
 void USBH_Delay(uint32_t delay)
 {
 	k_msleep(delay);
+}
+
+int stm32_hcd_adapter_raw_mouse_in(uint8_t active_pipe, uint8_t address,
+				    uint8_t speed, uint8_t endpoint,
+				    uint16_t packet_size, uint8_t interval_ms,
+				    bool bulk_schedule)
+{
+	static uint8_t data[64] __aligned(4);
+	const uint8_t probe_pipe = 3U;
+	const uint8_t ep_type = bulk_schedule ? EP_TYPE_BULK : EP_TYPE_INTR;
+	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
+	USB_OTG_HostChannelTypeDef *channel = USBx_HC(probe_pipe);
+	uint32_t hprt = stm32_hcd_adapter_port_status();
+	int result = -EIO;
+	bool initialized = false;
+
+	if (active_pipe >= 16U || active_pipe == probe_pipe || address == 0U ||
+	    (endpoint & 0x80U) == 0U || packet_size < 3U ||
+	    packet_size > sizeof(data) || interval_ms == 0U ||
+	    (hprt & USB_OTG_HPRT_PENA) == 0U) {
+		printf("rawin: invalid channel/descriptor or disabled port\n");
+		return -EINVAL;
+	}
+
+	irq_disable(STM32_HCD_IRQ);
+	if ((USBx_HC(active_pipe)->HCCHAR & USB_OTG_HCCHAR_CHENA) != 0U) {
+		(void)HAL_HCD_HC_Halt(&hcd_handle, active_pipe);
+		for (uint32_t i = 0; i < 100U; ++i) {
+			HAL_HCD_IRQHandler(&hcd_handle);
+			if ((USBx_HC(active_pipe)->HCCHAR & USB_OTG_HCCHAR_CHENA) == 0U) {
+				break;
+			}
+			k_busy_wait(50);
+		}
+	}
+	if ((USBx_HC(active_pipe)->HCCHAR & USB_OTG_HCCHAR_CHENA) != 0U) {
+		printf("rawin: production pipe %u did not halt\n", active_pipe);
+		result = -EBUSY;
+		goto out;
+	}
+	printf("rawin: address=%u ep=0x%02x mps=%u interval=%u speed=%u "
+	       "schedule=%s HPRT=%08lx\n",
+	       address, endpoint, packet_size, interval_ms, speed,
+	       bulk_schedule ? "bulk" : "interrupt", (unsigned long)hprt);
+
+	if (HAL_HCD_HC_Init(&hcd_handle, probe_pipe, endpoint, address, speed,
+			    ep_type, packet_size) != HAL_OK) {
+		printf("rawin: HAL_HCD_HC_Init failed\n");
+		goto out;
+	}
+	initialized = true;
+	hcd_handle.hc[probe_pipe].toggle_in = 0U;
+	for (uint8_t attempt = 0U; attempt < 12U; ++attempt) {
+		uint32_t events = 0U;
+		HCD_URBStateTypeDef state = URB_IDLE;
+
+		memset(data, 0, packet_size);
+		if (HAL_HCD_HC_SubmitRequest(&hcd_handle, probe_pipe, 1U, ep_type,
+					      USBH_PID_DATA, data, packet_size,
+					      0U) != HAL_OK) {
+			printf("rawin: attempt %u submit failed\n", attempt + 1U);
+			goto out;
+		}
+		for (uint32_t elapsed = 0U; elapsed < 30000U; elapsed += 50U) {
+			events |= channel->HCINT & channel->HCINTMSK;
+			HAL_HCD_IRQHandler(&hcd_handle);
+			state = HAL_HCD_HC_GetURBState(&hcd_handle, probe_pipe);
+			if (state == URB_DONE || state == URB_NOTREADY ||
+			    state == URB_ERROR || state == URB_STALL) {
+				break;
+			}
+			k_busy_wait(50);
+		}
+		printf("rawin: #%u events=%08lx urb=%u count=%lu hctsiz=%08lx "
+		       "hcchar=%08lx hprt=%08lx hptxsts=%08lx hfnum=%08lx "
+		       "data=%02x %02x %02x %02x\n",
+		       attempt + 1U, (unsigned long)events, state,
+		       (unsigned long)HAL_HCD_HC_GetXferCount(&hcd_handle, probe_pipe),
+		       (unsigned long)channel->HCTSIZ, (unsigned long)channel->HCCHAR,
+		       (unsigned long)stm32_hcd_adapter_port_status(),
+		       (unsigned long)USBx_HOST->HPTXSTS,
+		       (unsigned long)USBx_HOST->HFNUM,
+		       data[0], data[1], data[2], data[3]);
+		if (state == URB_DONE && HAL_HCD_HC_GetXferCount(&hcd_handle, probe_pipe) >= 3U) {
+			result = 0;
+			break;
+		}
+		if (state == URB_STALL || (stm32_hcd_adapter_port_status() &
+					   USB_OTG_HPRT_PENA) == 0U) {
+			break;
+		}
+		(void)HAL_HCD_HC_Halt(&hcd_handle, probe_pipe);
+		HAL_HCD_IRQHandler(&hcd_handle);
+		k_msleep(interval_ms);
+	}
+out:
+	if (initialized) {
+		(void)HAL_HCD_HC_Halt(&hcd_handle, probe_pipe);
+		HAL_HCD_IRQHandler(&hcd_handle);
+	}
+	if (!hcd_poll_mode) {
+		irq_enable(STM32_HCD_IRQ);
+	}
+	return result;
 }
 
 static HCD_URBStateTypeDef raw_wait_for_urb(uint8_t ch, uint32_t timeout_us)
@@ -1047,6 +1217,7 @@ bool stm32_hcd_adapter_get_poll_mode(void)
 void stm32_hcd_adapter_poll_service(void)
 {
 	if (hcd_poll_mode) {
+		record_mouse_irq();
 		HAL_HCD_IRQHandler(&hcd_handle);
 	}
 }

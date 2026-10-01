@@ -1,0 +1,6 @@
+rsource "../../apps/zephyr-hello-shell/Kconfig"
+
+config CUBE_CROSSOVER_GPIO
+	bool
+	default y
+	select USE_STM32_HAL_GPIO

@@ -12,6 +12,11 @@ extern "C" {
 int stm32_hcd_adapter_id_pin_level(void);
 int stm32_hcd_adapter_id_status(void);
 uint32_t stm32_hcd_adapter_port_status(void);
+void stm32_hcd_adapter_debug_channels(void);
+int stm32_hcd_adapter_raw_mouse_in(uint8_t active_pipe, uint8_t address,
+				    uint8_t speed, uint8_t endpoint,
+				    uint16_t packet_size, uint8_t interval_ms,
+				    bool bulk_schedule);
 
 /*
  * usb_debug.md Step 30 (plan item 3): minimal bare-metal control-transfer

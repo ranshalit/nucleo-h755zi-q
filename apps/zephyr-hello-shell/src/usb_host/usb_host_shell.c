@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "stm32_hcd_adapter.h"
+#include "usb_boot_mouse.h"
 #include "usb_gpio_capture.h"
 #include "../board_io.h"
 
@@ -13,8 +14,10 @@
 
 #include "usbh_core.h"
 
+extern USBH_ClassTypeDef usb_boot_mouse_class;
+
 #define USB_HOST_POLL_THREAD_STACK_SIZE 2048
-#define USB_HOST_POLL_THREAD_PRIORITY 7
+#define USB_HOST_POLL_THREAD_PRIORITY 10
 #define USB_HOST_POLL_PERIOD_MS 1
 
 K_THREAD_STACK_DEFINE(usb_host_poll_stack, USB_HOST_POLL_THREAD_STACK_SIZE);
@@ -148,15 +151,16 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 			}
 		}
 		/*
-		 * ST's USBH state machine needs multiple control-transfer
-		 * steps serviced faster than a 1 ms thread period. Run short
-		 * 10 us-spaced bursts while a control request is active, but
-		 * sleep after 99 iterations so this priority-7 thread does
-		 * not starve the lower-priority shell and application threads.
+		 * The mouse interrupt-IN transfer needs continuous fast host
+		 * processing: a 1 ms class sleep causes TXERR on this board.
+		 * Keep this thread below the shell and application workers so
+		 * the busy loop cannot prevent them from running.
 		 */
-		if (running && usb_host_needs_fast_poll() &&
+		if (running && usb_host.gState == HOST_CLASS) {
+			k_busy_wait(50);
+		} else if (running && usb_host_needs_fast_poll() &&
 		    ++fast_poll_count < 100U) {
-			k_busy_wait(10);
+			k_busy_wait(50);
 		} else {
 			fast_poll_count = 0;
 			k_msleep(USB_HOST_POLL_PERIOD_MS);
@@ -168,6 +172,10 @@ int board_usb_host_start(void)
 {
 	if (USBH_Init(&usb_host, usb_host_user_process, 0U) != USBH_OK ||
 	    usb_host.pData == NULL) {
+		usb_host_init_result = -EIO;
+		return usb_host_init_result;
+	}
+	if (USBH_RegisterClass(&usb_host, &usb_boot_mouse_class) != USBH_OK) {
 		usb_host_init_result = -EIO;
 		return usb_host_init_result;
 	}
@@ -206,6 +214,26 @@ static int cmd_usbhost_status(const struct shell *shell, size_t argc, char **arg
 		    control_state_name(usb_host.Control.state));
 	shell_print(shell, "connected: %u", usb_host.device.is_connected);
 	shell_print(shell, "port_enabled: %u", usb_host.device.PortEnabled);
+	shell_print(shell, "cfg_len=%u ctrl_len=%u speed=%u timer=%lu ctrl_timer=%u "
+		    "request=%u ep0_mps=%u",
+		    usb_host.device.CfgDesc.wTotalLength, usb_host.Control.length,
+		    usb_host.device.speed, (unsigned long)usb_host.Timer,
+		    usb_host.Control.timer, usb_host.RequestState,
+		    usb_host.Control.pipe_size);
+	shell_print(shell, "setup: %02x %02x value=%04x index=%04x length=%u",
+		    usb_host.Control.setup.b.bmRequestType,
+		    usb_host.Control.setup.b.bRequest,
+		    usb_host.Control.setup.b.wValue.w,
+		    usb_host.Control.setup.b.wIndex.w,
+		    usb_host.Control.setup.b.wLength.w);
+	stm32_hcd_adapter_debug_channels();
+	struct usb_boot_mouse_report report;
+	uint32_t count;
+
+	if (usb_boot_mouse_last_report(&report, &count)) {
+		shell_print(shell, "mouse: reports=%u buttons=%u dx=%d dy=%d wheel=%d",
+			    count, report.buttons, report.x, report.y, report.wheel);
+	}
 	return 0;
 }
 
@@ -220,6 +248,7 @@ static int cmd_usbhost_descriptor(const struct shell *shell, size_t argc,
 		shell_error(shell, "full device descriptor not received");
 		return -ENODEV;
 	}
+
 	if (usb_host.device.DevDesc.bLength != USB_LEN_DEV_DESC) {
 		shell_error(shell, "no valid device descriptor");
 		return -ENODEV;
@@ -234,6 +263,55 @@ static int cmd_usbhost_descriptor(const struct shell *shell, size_t argc,
 	shell_print(shell, "usb_version:  0x%04x",
 		    usb_host.device.DevDesc.bcdUSB);
 	return 0;
+}
+
+static int cmd_usbhost_rawin(const struct shell *shell, size_t argc, char **argv)
+{
+	const USBH_InterfaceDescTypeDef *interface = &usb_host.device.CfgDesc.Itf_Desc[0];
+	const USBH_EpDescTypeDef *endpoint = NULL;
+	uint8_t pipe = USBH_MAX_PIPES_NBR;
+	bool bulk_schedule = argc == 2U && strcmp(argv[1], "bulk") == 0;
+
+	if (argc > 2U || (argc == 2U && !bulk_schedule)) {
+		shell_error(shell, "usage: usbhost rawin [bulk]");
+		return -EINVAL;
+	}
+	if (!atomic_get(&usb_host_poll_paused) ||
+	    usb_host.gState != HOST_CLASS ||
+	    usb_host.pActiveClass != &usb_boot_mouse_class ||
+	    usb_host.device.PortEnabled == 0U) {
+		shell_error(shell, "pause an active boot mouse first (usbhost pause)");
+		return -EBUSY;
+	}
+	for (uint8_t i = 0U; i < interface->bNumEndpoints &&
+			    i < USBH_MAX_NUM_ENDPOINTS; ++i) {
+		if ((interface->Ep_Desc[i].bEndpointAddress & 0x80U) != 0U &&
+		    (interface->Ep_Desc[i].bmAttributes & 0x03U) == USB_EP_TYPE_INTR) {
+			endpoint = &interface->Ep_Desc[i];
+			break;
+		}
+	}
+	if (endpoint == NULL) {
+		shell_error(shell, "no mouse interrupt-IN endpoint");
+		return -ENODEV;
+	}
+	for (uint8_t i = 0U; i < USBH_MAX_PIPES_NBR; ++i) {
+		if (usb_host.Pipes[i] == (0x8000U | endpoint->bEndpointAddress)) {
+			pipe = i;
+			break;
+		}
+	}
+	if (pipe == USBH_MAX_PIPES_NBR) {
+		shell_error(shell, "mouse interrupt pipe not allocated");
+		return -ENODEV;
+	}
+	k_msleep(5);
+	shell_print(shell, "raw HAL interrupt-IN probe; polling remains paused; reset to restore class");
+	return stm32_hcd_adapter_raw_mouse_in(pipe, usb_host.device.address,
+					      usb_host.device.speed,
+					      endpoint->bEndpointAddress,
+					      endpoint->wMaxPacketSize,
+					      endpoint->bInterval, bulk_schedule);
 }
 
 static void print_capture_result(const struct shell *shell)
@@ -521,6 +599,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(rawtest, NULL,
 		  "Bare-metal HAL-only control transfer test, bypassing USBH middleware",
 		  cmd_usbhost_rawtest),
+	SHELL_CMD(rawin, NULL,
+		  "Probe configured boot mouse with raw HAL [bulk] (pause first; reset after)",
+		  cmd_usbhost_rawin),
 	SHELL_CMD(pause, NULL,
 		  "Pause the USBH middleware's background poll thread",
 		  cmd_usbhost_pause),

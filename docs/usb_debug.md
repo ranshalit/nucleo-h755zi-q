@@ -1,11 +1,36 @@
 # USB Host Bring-Up Debug Log (Nucleo-H755ZI-Q, `apps/zephyr-hello-shell`)
 
-This document is a chronological record of the investigation and fixes carried
-out during USB bring-up, starting from "why doesn't the USB camera LED turn
-on" and ending at the current unresolved `FHMOD=1`, `CMOD=0` forced-host
-transition failure. The enumeration-only host stack is implemented but has
-not yet reached enumeration on hardware. This is a debugging reference for
-future USB/host work on this board, not end-user documentation.
+This document is a chronological record of USB bring-up, starting from
+"why doesn't the USB camera LED turn on." Earlier failures below describe
+the state *at that step*, not the current mouse result.
+
+## Current mouse functionality
+
+The Dell MS116/PixArt boot mouse (`413c:301a`) connected directly to USER
+USB CN13 **works in the normal Zephyr application**. Run `usbhost resume`
+on the ST-LINK UART, move/click the mouse, then run `usbhost status`.
+The class decodes movement, buttons, and wheel from the 4-byte
+interrupt-IN reports; status shows the cumulative `mouse: reports=`
+count and last decoded report. The board does not expose the mouse as a
+Zephyr input device or move a host-side pointer; the data is available
+through this class and UART diagnostics.
+
+The normal-firmware live capture decoded 919 movement/button lines
+and counted 1,028 reports with no interrupt-IN transfer errors.
+Four fresh resets of the minimal Zephyr image got first mouse IRQ
+`NAK`, not `TXERR`, and a live capture counted 1,358 reports including
+button input. The host uses the STM32 HAL HCD interrupt and ST USB
+Host middleware, but advances the middleware at a continuous 50 us
+loop in `HOST_CLASS`. A 1 ms class-loop sleep reproduced first-event
+`TXERR` on 3/3 crossover resets. This fast processing is a
+CPU-intensive **workaround** for a timing-sensitive integration, not
+proof that the hardware must be polled at 20 kHz or that TXERR can
+never occur. See Steps 65-66 and the crossover experiment README.
+
+The earlier full-speed flash-drive enumeration also works. **Webcam
+video has not been demonstrated**: the HP camera has separate
+enumeration failures, and this application has no host-side UVC
+class or video transfer implementation.
 
 ## Starting point
 
@@ -3779,3 +3804,413 @@ isolating the camera's VBUS locally changes anything, but current
 evidence points more strongly toward camera/cable signal integrity,
 device-specific transaction behavior, or an OTG electrical/timing
 interaction that the Cruzer does not trigger.
+
+## Step 55: Post-cadence-fix low-speed mouse retest
+
+With the mouse connected directly to CN13, rebuilt and flashed the
+host-enabled hello-shell app with the bounded fast `USBH_Process()` cadence
+from Step 52. The production host now reads the full device descriptor and
+assigns address 1 (`VID=413c`, `PID=301a`, low speed), unlike the
+pre-fix failure at the very first SETUP. In repeated runs it progressed
+as far as the 34-byte configuration descriptor or the manufacturer
+string (`PixArt`), then remained indefinitely in `CTRL_DATA_IN_WAIT`.
+One snapshot of a 34-byte request showed 16 bytes received on the IN
+channel, `URB_IDLE`, and 18 bytes still expected. Another run stalled
+after eight bytes of a 255-byte product-string request. At one stall the
+port had changed from enabled (`HPRT=0x00041805`) to disabled
+(`HPRT=0x00041801`), despite `PA9=1` and `PG7_nFAULT=1`.
+
+Isolated raw HAL control requests on the same mouse succeeded with an
+18-byte device descriptor (three 8-byte packets) and with a 255-byte
+product-string request that returned a valid 58-byte descriptor, including
+the zero-length STATUS stage in each case. Thus the mouse supports
+multi-packet control reads; the production failure is not explained
+simply by a maximum packet size of eight bytes or by requesting more
+string bytes than the device returns. Synchronous IRQ polling was also
+tried on a fresh boot; it still failed after address assignment, with
+repeated `URB_NOTREADY` on the control OUT channel.
+
+**Current boundary:** the mouse is detected and partially enumerated, but
+full configuration and HID input have not been validated. Investigate
+why the production low-speed port becomes disabled or a control URB
+remains idle; only then register a HID host class and poll interrupt-IN
+mouse reports. The diagnostic-only code changes used in this step were
+reverted.
+
+## Step 56: Powered hub test reaches hub, not downstream mouse
+
+After inserting a self-powered USB hub between CN13 and the mouse,
+reset the board and resumed the unchanged host firmware. The root
+port reported full speed (`HPRT=0x00021401`), and the host read the
+hub's device descriptor: `VID=8564`, `PID=4100`, device class `0x09`
+(hub), USB version 2.10. It assigned address 1, then remained in
+`ENUM_GET_MFC_STRING_DESC` / `CTRL_DATA_IN_WAIT`; the port-enable
+bit was clear at the final snapshot. No mouse descriptor was read.
+
+The current host application has no hub class driver or downstream
+port-management support. Detecting a hub on the root port therefore
+cannot demonstrate whether the mouse behind it works. A direct mouse
+connection remains the shorter path to testing HID; supporting this
+hub first requires enumerating/configuring it, powering and resetting
+its downstream port, and handling low-speed transactions through its
+transaction translator, in addition to adding mouse HID support.
+
+## Step 57: Direct mouse retest separates port disable from control failure
+
+Reconnected the mouse directly to CN13 and confirmed the root port
+again reported low speed (`HPRT=0x00041801`). With temporary event
+diagnostics, the host read `413c:301a`, assigned address 1, and
+sometimes read the manufacturer string (`PixArt`). One run stalled
+indefinitely at `ENUM_GET_PRODUCT` / `CTRL_STATUS_OUT_WAIT`, repeatedly
+reporting `URB_STALL` on the control OUT pipe while the port *remained
+enabled* (`HPRT=0x00041805`, `port_enabled=1`). In another run, the
+first `URB_NOTREADY` occurred on a SETUP transfer at an enabled port;
+`unrecovered error` followed, and only then did the port-disable
+callbacks occur while the host reset and retried enumeration.
+
+Thus a disabled port in an earlier final snapshot is not established
+as the initiating cause; the middleware/HCD control-transfer error
+comes first in at least one captured run. The middleware's
+`CTRL_STATUS_OUT_WAIT` handles `URB_DONE`, `URB_NOTREADY`, and
+`URB_ERROR`, but does not handle `URB_STALL`, explaining why that
+particular failure remains stuck without recovery. Why the low-speed
+mouse produces the control-transfer STALL/NOTREADY under the production
+host path is not yet resolved. Event diagnostics were removed after
+this run.
+
+## Step 58: Cadence A/B and boot-mouse interrupt transfers
+
+On the directly attached Dell MS116 (`413c:301a`), the production host
+completed enumeration and set its configuration on 2/6 fresh resets
+with 10 us-spaced fast control polling, versus 16/16 fresh resets with
+50 us-spaced polling. The latter is an empirical improvement on this
+mouse, not an established explanation of the earlier failures or proof
+of reliability across other devices.
+
+Added a narrow ST-middleware HID boot-mouse class for the first
+interface: it requires a boot mouse and a valid interrupt-IN endpoint,
+sends HID `SET_PROTOCOL(BOOT)`, and decodes 3- or 4-byte movement,
+button, and wheel reports. On fresh resets the host reached
+`Boot mouse class started` and `boot mouse ready on EP 0x81
+(interval 10 ms)`. The host did **not** receive a report, even during
+continuous physical movement and clicks. Channel 2 returned
+`URB_ERROR`, with its host-channel interrupt trace counting `TXERR`
+(bit 7) and channel halted (bit 1) while the root port stayed enabled
+(`HPRT=0x00041805`). Bounded 10 ms interval retries still yielded zero
+reports. Switching to synchronous HCD IRQ polling for three resets did
+not change that result (TXERR on all three). Delaying the first poll
+100 ms after `SET_PROTOCOL` also did not help and was removed.
+
+The working boundary is now **configured boot mouse, but no HID input**.
+The interrupt-IN transaction errors remain unexplained; do not
+interpret enumeration success as functional mouse support. The
+boot-mouse class, 50 us cadence, and read-only channel-2 IRQ diagnostics
+remain in the worktree for further investigation, uncommitted.
+
+## Step 59: Raw HAL interrupt-IN reproduces TXERR below HID class
+
+Added `usbhost rawin` as an isolated probe of the already configured
+direct mouse: resume the host, wait for `boot mouse ready`, then run
+`usbhost pause` and `usbhost rawin`. It requires the mouse class and an
+enabled root port, halts the class's active channel, and submits
+interrupt-IN requests directly through STM32 HAL on a separate host
+channel, using the enumerated address, endpoint, packet size, speed,
+and interval. It does not reset the port or change the device address.
+It leaves the middleware paused; reset before resuming normal operation.
+
+On three fresh resets the configured mouse was at address 1, low speed,
+endpoint `0x81`, max packet size 4, interval 10 ms, with the port enabled
+(`HPRT=0x00041805`). All 12 raw transfers on **each** reset saw
+`HCINT=0x82` (`TXERR | CHH`); none transferred any bytes. HAL classified
+every third attempt as `URB_ERROR` after its transaction-error counter
+exceeded two, while the intervening attempts were `URB_NOTREADY`.
+There were no successful DATA packets or NAK events in this probe.
+This matches the production interrupt-IN channel's TXERR/CHH trace
+and rules out the HID report decoder and the ST host class state
+machine as the direct source of *these* interrupt-IN errors. It does
+not establish whether the OTG host controller's low-speed interrupt
+scheduling, PHY/bus signaling, device response, or another HAL-level
+condition is the cause. No mouse-input success is claimed.
+
+## Step 60: Host periodic scheduler A/B still returns TXERR
+
+Using `usbhost rawin bulk` after the same configure/pause sequence
+programs the **same mouse endpoint and DATA0 IN token** on probe
+channel 3, but requests HAL's non-periodic bulk scheduling instead of
+interrupt scheduling. This is a diagnostic controller setting, **not**
+a valid replacement HID transport: the mouse's descriptor still
+specifies interrupt-IN. Two fresh resets in each mode yielded 12/12
+`TXERR | CHH`, zero bytes, no `NAK`, and an enabled low-speed port
+per run. Both channels used address 1, endpoint `0x81`, MPS 4 and
+10 ms spacing. The periodic TX FIFO had free space in sampled
+`HPTXSTS` (`0x2d0800e0`). This A/B makes an issue exclusive to the
+periodic request queue unlikely; it does not rule out a shared
+HAL/controller timing or electrical problem.
+
+The HAL speed value 2 matches both `USBH_SPEED_LOW` and
+`HCD_DEVICE_SPEED_LOW`, and the controller's HCFG selects the 6 MHz
+low-speed clock with HFIR=6000. Successful EP0 control transfers
+already reach address 1 and configure the device, so the remaining
+failure is specific to the nonzero mouse data endpoint or the stage
+after configuration—not a blanket inability to address this
+low-speed mouse. The experiment remains diagnostic and uncommitted.
+
+## Step 61: Standalone STM32Cube HID host reads mouse movement and buttons
+
+Built `experiments/cube-hid-mouse` for the exact NUCLEO-H755ZI-Q CM7:
+official ST USB Host Core/HID middleware, STM32CubeH7 HAL, USB_OTG_FS
+embedded PHY on PA11/PA12, HSI48 kernel clock, PD10 active-low VBUS,
+and ST-LINK USART3 at 115200. The board's current `BCM4=0` option byte
+was retained; no CM4 image or option-byte changes were needed. This
+bare-metal host calls `USBH_Process()` continuously, in contrast to
+the Zephyr app's scheduled polling. It uses a different HAL snapshot,
+so it is a functional comparison, not a one-variable experiment.
+
+Flashed its CM7 ELF with STM32_Programmer_CLI and tested the **same
+directly attached** Dell/PixArt `413c:301a` mouse on CN13. UART logged
+address assignment, descriptor strings, configuration, boot-mouse
+interface recognition, and `USB HID active`. All three fresh resets
+again configured and activated the HID class. During an explicit
+12-second movement/button test, UART captured **1,147 mouse reports**
+with signed X/Y deltas and button transitions (including `110` and
+`011`). This proves a working mouse host on this board without a hub
+or USB analyzer. Logs: `/tmp/cube-hid-first-boot.log`,
+`/tmp/cube-hid-reset-{1..3}.log`, and
+`/tmp/cube-hid-movement-live.log`.
+
+The remaining failure is specific to the Zephyr-host combination,
+not an inherent limitation of the board, VBUS path, mouse, or ST
+middleware as a whole. The two builds differ in HAL version, USBH
+class/driver implementation, scheduling/IRQ context, and application
+load. Compare the first EP `0x81` host-channel events and frame timing
+under both builds before assigning root cause to any one difference.
+**The Cube image is currently flashed on the board**; Zephyr must be
+reflashed to resume its shell/HTTP app.
+
+The initial HAL-version A/B gave unreadable UART output at 115200:
+the west workspace's HAL header defaulted `HSE_VALUE` to 25 MHz
+instead of this board's 8 MHz. Consequently HAL calculated a fictitious
+1.25 GHz clock from the real 400 MHz PLL and programmed USART3 for
+approximately 36.8 kbaud. Reading USART3 BRR through SWD showed
+`0x0a99` with the swapped HAL, versus `0x0364` in the known-good
+build. At 38400 baud, that first swapped image already logged
+configuration and `USB HID active`; the unreadable output was **not
+a USB failure**.
+
+For a controlled comparison, the bare-metal app was rebuilt against
+`vendor/zephyrproject/modules/hal/stm32/stm32cube/stm32h7xx/drivers`
+with `-DHSE_VALUE=8000000U` for all translation units. The fixed image
+logged the correct 400 MHz clock and USB HID activation at 115200 on
+three fresh resets. During a 12-second move/click test it delivered
+**1,033 movement/button reports**, including pressed buttons; further
+resets produced reports as well. This vendor-HAL Cube image is the
+current board firmware. Thus the **same HAL snapshot used by
+Zephyr works on bare metal with the same mouse and STM32Cube HID
+middleware**. The HAL version alone does not explain Zephyr's
+interrupt-IN TXERR. Remaining differences include Zephyr's
+USBH polling/IRQ scheduling, system configuration/load, and its
+distinct boot-mouse class. Build command (output in `/tmp`):
+
+```sh
+make -C experiments/cube-hid-mouse \
+  HAL_SRC=../../vendor/zephyrproject/modules/hal/stm32/stm32cube/stm32h7xx/drivers/src \
+  HAL_INC=../../vendor/zephyrproject/modules/hal/stm32/stm32cube/stm32h7xx/drivers/include \
+  BUILD=/tmp/cube-vendor-hal all
+```
+
+## Step 62: HID startup requests do not explain interrupt-IN TXERR
+
+Compared Cube's HID startup to Zephyr's boot-mouse class on the same
+directly connected mouse. In separate, single-change Zephyr trials:
+
+- `SET_PROTOCOL(1)` (Cube's report-protocol value) configured on 4/4
+  resets but delivered zero reports; channel 2 still recorded `TXERR`.
+- An initial `GET_REPORT` returned `USBH_NOT_SUPPORTED` on 4/4 resets,
+  as Cube's HID class explicitly tolerates. Subsequent interrupt-IN
+  transfers still returned `TXERR` and zero reports.
+- Synchronizing the first interrupt-IN poll to Cube's odd-frame
+  transition still yielded `TXERR` and zero reports on 4/4 resets.
+- `SET_IDLE(0)` succeeded on three configured resets, but subsequent
+  interrupt-IN transfers still yielded `TXERR` and zero reports.
+  A fourth reset stalled earlier in control enumeration and does not
+  count as a class-level result.
+
+Each Zephyr change was reverted before the next trial. For a stronger
+class-sequence comparison, temporarily reduced the **working Cube
+application using Zephyr's HAL snapshot** to Zephyr's shorter startup:
+skip report-descriptor and `SET_IDLE` requests, send only
+`SET_PROTOCOL(BOOT)`, skip initial `GET_REPORT`, and start polling
+without Cube's initial frame synchronization. On three fresh resets
+the Cube class still activated, and the first interrupt-channel event
+was `NAK` (`HCINT=0x10`), not `TXERR`. Restored Cube's original class
+code after this experiment. A `NAK` while the mouse is stationary is
+normal; these particular eight-second captures did not include mouse
+movement or button-report validation.
+
+Read-only snapshots immediately before the first channel-2 IRQ show
+the same endpoint, packet size, transfer size (`HCTSIZ=0x00080004`),
+and interrupt mask (`HCINTMSK=0x0000079f`) in both systems. Cube
+reported first IRQ `0x10` on three resets; Zephyr reported first IRQ
+`0x80` on three resets with an enabled port and zero reports. The
+channel-characteristic register differed in transient enable/disable
+bits when sampled at the IRQ. The next investigation should compare
+controller setup, clock/GPIO configuration, and execution/IRQ timing
+between the two applications, rather than assuming Cube's HID startup
+sequence is required. Root cause is still unknown; the restored
+Zephyr boot-mouse class still cannot read mouse reports.
+
+## Step 63: Controller state, pin configuration, and timing comparison
+
+Captured matching registers at the **first channel-2 interrupt** in
+Cube (with Zephyr's HAL snapshot) and Zephyr. Cube's first event was
+`NAK` (`0x10`) and Zephyr's was `TXERR` (`0x80`). Both used channel 2,
+endpoint `0x81`, `HCCHAR` endpoint/address/speed/type settings,
+`HCTSIZ=0x00080004`, `HCINTMSK=0x0000079f`, HSI48 ready
+(`RCC_CRRCR=0x170`), USB clock selection (`RCC_D2CCIP2R=0x00300000`),
+`GUSBCFG=0x20001440`, `GCCFG=0x00010000`, `HCFG=0x202`, and
+`HFIR=0x1770`. PA11/PA12 mode, AF10, pull, output type, and speed
+also matched. The first IRQ frame counter and the transient
+channel-enable/odd-frame bits varied, but neither identified a
+consistent incorrect channel setting.
+
+Cube configured PA10 (USB ID) as AF10 push-pull with no pull, while
+Zephyr used AF10 open-drain with pull-up. Temporarily matching Cube's
+PA10 settings in Zephyr still produced `TXERR` and zero reports on
+three configured fresh resets; one additional reset stalled earlier
+in control enumeration. Restored the original PA10 configuration.
+
+The normal Zephyr build uses a 10 kHz OS tick and a 480 MHz CM7,
+versus Cube's 1 kHz tick and 400 MHz CM7. In isolated experiments,
+Zephyr at 1 kHz still yielded first-event `TXERR` on three
+configured resets (one stalled before class initialization); Zephyr
+at 400 MHz also yielded first-event `TXERR` on 4/4 configured
+resets. Temporarily slowing Cube's HID-processing loop to one
+iteration per millisecond **after** class activation still produced
+first-event `NAK` on 3/3 resets. Restored the normal clock/tick
+settings and continuous Cube loop afterward.
+
+Finally, bypassed Cube's `HAL_HCD_Init()` and called the same
+`USB_CoreInit()`, `USB_SetCurrentMode()`, and `USB_HostInit()` sequence
+used by Zephyr, with Cube's existing GPIO/IRQ setup. Cube still
+activated HID and received first-event `NAK` on 3/3 resets. Restored
+its original HAL initialization after the experiment.
+
+These controlled trials do **not** establish a working Zephyr mouse:
+the captures were taken with a stationary mouse and did not check
+new movement reports. The first-event contrast persists across
+clock, tick, basic GPIO/USB register, and HCD-init comparisons.
+The remaining differences are Zephyr's execution environment,
+interrupt handling/lifecycle, other enabled peripherals, and
+possibly hardware state not represented in the captured registers.
+None of these is yet confirmed as the cause. Logs for this step are
+under `/tmp/{cube,zephyr}-{first-system,pa10,tick1k,slow,400,manual}*`.
+
+## Step 64: First interrupt-IN submission and hardware-frame A/B
+
+No external USB protocol analyzer or oscilloscope is available. The
+existing `usbhost arm` / `usb_gpio_capture.c` software capture was
+already tried in Step 22: PA11/PA12 GPIO input readbacks were constant
+zero while AF10 routed these pins to the USB PHY. Those samples cannot
+distinguish a transmitted IN token from a NAK or absent mouse response.
+
+Taking Ethernet interface 1 down **before** `usbhost resume` on four
+fresh Zephyr resets did not change the result: all configured the
+mouse and the first channel-2 IRQ remained `TXERR` (`0x80`), with zero
+reports. This excludes active Ethernet-interface traffic as a
+necessary condition, not all effects of the initialized networking
+stack or other application threads.
+
+Temporary register probes at the first interrupt-IN submission and
+first channel IRQ recorded three resets in each image. Both used
+channel 2, low-speed EP `0x81`, no split transaction
+(`HCSPLT=0`), empty previous interrupt status, and the same periodic
+TX FIFO status (`HPTXSTS=0x000800e0`), with the root port enabled
+(`HPRT=0x00041805`) at the first event. Cube submitted on an even
+hardware frame, set `HCCHAR.ODDFRM`, and received a NAK (`0x10`)
+on the next frame. Zephyr submitted on an odd hardware frame, cleared
+`ODDFRM`, and received TXERR (`0x80`) on the next frame.
+
+To isolate **hardware** frame parity (not the middleware's SOF timer),
+temporarily waited for even `HFNUM` before Zephyr's first mouse
+channel submission. All five fresh resets configured, submitted on
+an even frame with `HCCHAR.ODDFRM` set as in Cube, and still returned
+first-event TXERR with zero reports. The frame-alignment trial and
+all temporary submission probes were removed afterward.
+Controller status alone does not establish whether the IN token was
+put on the physical D+/D− pair, whether the mouse replied, or whether
+the reply failed decoding. That boundary requires external bus
+observation; do not treat the old software GPIO sample as proof.
+
+## Step 65: Mouse-only Zephyr image still returns TXERR
+
+Built a separate `experiments/minimal-zephyr-mouse/` application for the
+same board with the **unchanged** production USB host adapter, class,
+middleware, polling cadence, early UART/VBUS setup, and UART shell.
+`CONFIG_NETWORKING=n` and both Ethernet MAC and MDIO nodes are disabled;
+no HTTP, camera stream, or LED blink threads are started. `board_io.c`
+remains linked for the existing `usbhost rawtest` command but its
+blink-thread startup is never called. The minimal variant uses the same
+480 MHz board clock and GPIO VBUS control as the normal image.
+
+On four fresh resets with the same directly attached Dell/PixArt
+`413c:301a` mouse, `usbhost resume` enumerated and configured the
+mouse, completed `SET_PROTOCOL(BOOT)`, and logged `boot mouse ready`.
+Each first channel-2 interrupt was `TXERR` (`HCINT=0x80`), with the
+port enabled (`port_enabled=1`); after the observation window,
+`usbhost status` showed `mouse: reports=0` every time. This rules out
+active Ethernet, HTTP, camera streaming, or LED-blink threads as
+**necessary** causes of the interrupt-IN failure. It does not rule
+out a shared Zephyr/HAL integration difference, IRQ context,
+controller behavior, or electrical timing. Logs:
+`/tmp/minimal-mouse-reset-{1..4}.log`. The normal Zephyr shell image
+was reflashed after the trial.
+
+## Step 66: Cube host crossover isolates host-loop cadence; mouse input works
+
+Ran Cube USB Host Core/HID middleware in a minimal Zephyr application
+(`experiments/zephyr-cube-crossover/`). With Cube's platform bridge,
+the first mouse-channel IRQ was `NAK` (`0x10`) on 4/4 fresh resets and
+a user-assisted 20-second capture decoded 1,415 movement reports.
+With the **original Zephyr HCD adapter** in place of Cube's bridge,
+Cube HID again got first `NAK` on 3/3 resets and decoded 1,296
+movement/button reports over 20 seconds. Thus the existing Zephyr
+bridge can carry actual input, not just enumerate the device.
+
+Keeping the Zephyr bridge and Cube Core but replacing Cube HID with
+the application's boot-mouse class, at a continuous 50 us host loop,
+gave first `NAK` on 3/3 resets. A further 20-second live capture
+decoded 1,030 movement/button lines with no transfer errors. The
+class and its decoder can also work without modification.
+
+Changing only that class loop to a 1 ms sleep reproduced first-event
+`TXERR` (`0x80`) and zero reports on 3/3 resets. Applying the same
+1 ms sleep to Cube HID caused a post-activation control error, so it
+does not independently identify the mouse transfer. A bounded loop
+of 99 fast 50 us iterations followed by a 1 ms sleep yielded first
+`NAK` on 3/4 resets but later TXERR retries and mouse-class abort;
+the fourth was still enumerating during the observation window.
+Continuous servicing, not merely a fast initial transfer, matters
+in these trials. This is evidence for a timing-sensitive interaction,
+not an electrical explanation of the OTG core's TXERR.
+
+Updated the shared production USB host poll thread to run 50 us
+iterations throughout `HOST_CLASS` and lowered its priority below
+the shell (priority 9 shell, 10 USB host). Control transfers retain
+their bounded fast bursts. The mouse-only Zephyr image then got first
+`NAK` on 4/4 fresh resets; live movement/click testing decoded 980
+input lines (1,358 reports total, 166 lines with buttons) without
+transfer errors. The normal Zephyr image was built and flashed, got
+first `NAK`, and decoded 919 movement/button lines (1,028 reports
+total, 178 lines with buttons), also with no transfer errors.
+UART shell, HTTP, LED control, and host-to-board ping continued to
+work. Board-to-host ping at the historical `.100` address failed
+because the host now has `192.168.55.101`; manually pinging `.101`
+from the board succeeded. The 50 us busy loop consumes CPU while
+USB is active, so a future event-driven scheduling solution would
+need separate hardware validation before replacing it. Logs:
+`/tmp/crossover-fast-boot-{1..3}.log`,
+`/tmp/crossover-slow-boot-{1..3}.log`,
+`/tmp/crossover-burst-boot-{1..4}.log`,
+`/tmp/minimal-fast-shell-{1..4}.log`,
+`/tmp/minimal-fast-shell-live.log`, and
+`/tmp/production-fast-mouse-live.log`.
