@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <zephyr/kernel.h>
 
 #include "usbh_core.h"
 #include "usbh_ctlreq.h"
@@ -33,6 +34,16 @@ struct mouse_state {
 };
 
 static struct mouse_state mouse;
+static struct k_spinlock snapshot_lock;
+static struct usb_boot_mouse_snapshot mouse_snapshot;
+
+void usb_boot_mouse_snapshot_get(struct usb_boot_mouse_snapshot *snapshot)
+{
+	k_spinlock_key_t key = k_spin_lock(&snapshot_lock);
+
+	*snapshot = mouse_snapshot;
+	k_spin_unlock(&snapshot_lock, key);
+}
 
 bool usb_boot_mouse_last_report(struct usb_boot_mouse_report *report,
 				uint32_t *count)
@@ -52,6 +63,13 @@ static USBH_StatusTypeDef mouse_init(USBH_HandleTypeDef *host)
 	const USBH_EpDescTypeDef *endpoint = NULL;
 
 	memset(&mouse, 0, sizeof(mouse));
+	k_spinlock_key_t key = k_spin_lock(&snapshot_lock);
+
+	uint32_t session = mouse_snapshot.session + 1U;
+
+	memset(&mouse_snapshot, 0, sizeof(mouse_snapshot));
+	mouse_snapshot.session = session;
+	k_spin_unlock(&snapshot_lock, key);
 	if (interface->bInterfaceClass != HID_CLASS ||
 	    interface->bInterfaceSubClass != HID_BOOT_SUBCLASS ||
 	    interface->bInterfaceProtocol != HID_MOUSE_PROTOCOL ||
@@ -100,6 +118,10 @@ static USBH_StatusTypeDef mouse_init(USBH_HandleTypeDef *host)
 
 static USBH_StatusTypeDef mouse_deinit(USBH_HandleTypeDef *host)
 {
+	k_spinlock_key_t key = k_spin_lock(&snapshot_lock);
+
+	mouse_snapshot.connected = false;
+	k_spin_unlock(&snapshot_lock, key);
 	if (mouse.allocated) {
 		USBH_ClosePipe(host, mouse.pipe);
 		USBH_FreePipe(host, mouse.pipe);
@@ -121,6 +143,10 @@ static USBH_StatusTypeDef mouse_requests(USBH_HandleTypeDef *host)
 
 	if (result == USBH_OK) {
 		mouse.next_poll = host->Timer;
+		k_spinlock_key_t key = k_spin_lock(&snapshot_lock);
+
+		mouse_snapshot.connected = true;
+		k_spin_unlock(&snapshot_lock, key);
 		printf("ST USBH: boot mouse ready on EP 0x%02x (interval %u ms)\n",
 		       mouse.endpoint, mouse.interval);
 	} else if (result != USBH_BUSY) {
@@ -149,6 +175,10 @@ static USBH_StatusTypeDef mouse_process(USBH_HandleTypeDef *host)
 			}
 			mouse.last = report;
 			mouse.count++;
+			k_spinlock_key_t key = k_spin_lock(&snapshot_lock);
+
+			usb_boot_mouse_accumulate(&mouse_snapshot, &report);
+			k_spin_unlock(&snapshot_lock, key);
 			mouse.errors = 0U;
 			if (report.buttons != 0U || report.x != 0 ||
 			    report.y != 0 || report.wheel != 0) {

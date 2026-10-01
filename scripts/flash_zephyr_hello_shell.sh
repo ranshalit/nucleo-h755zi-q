@@ -366,6 +366,22 @@ def extract_led_state(document: object, color: str) -> str | None:
 
     return None
 
+def has_mouse_snapshot(io: object) -> bool:
+    if not isinstance(io, dict):
+        return False
+    mouse = io.get("mouse")
+    if not isinstance(mouse, dict):
+        return False
+    presses = mouse.get("presses")
+    return (
+        isinstance(mouse.get("connected"), bool)
+        and all(isinstance(mouse.get(field), int) for field in
+                ("session", "reports", "buttons", "x", "y", "wheel"))
+        and isinstance(presses, dict)
+        and all(isinstance(presses.get(button), int) for button in
+                ("left", "right", "middle"))
+    )
+
 def flash_build() -> None:
     env = os.environ.copy()
     env["PATH"] = f"{os.path.dirname(PROGRAMMER)}:{env['PATH']}"
@@ -630,6 +646,11 @@ def attempt_validation(attempt: int) -> bool:
             attempts=3,
             delay_sec=1.0,
         )
+        host_http_mouse_ok, host_http_mouse_output = run_host_curl(
+            ["--fail", f"http://{BOARD_IPV4_ADDR}/api/v1/mouse"],
+            attempts=3,
+            delay_sec=1.0,
+        )
         host_http_led_on_ok, host_http_led_on_output = run_host_curl(
             [
                 "--fail",
@@ -671,6 +692,7 @@ def attempt_validation(attempt: int) -> bool:
 
         host_http_status_doc = parse_json_document(host_http_status_output)
         host_http_io_doc = parse_json_document(host_http_io_output)
+        host_http_mouse_doc = parse_json_document(host_http_mouse_output)
         host_http_led_on_doc = parse_json_document(host_http_led_on_output)
         host_http_io_after_on_doc = parse_json_document(host_http_io_after_on_output)
         host_http_led_off_doc = parse_json_document(host_http_led_off_output)
@@ -706,6 +728,8 @@ def attempt_validation(attempt: int) -> bool:
         print(host_http_status_repeat_output.strip())
         print(f"--- host http GET /api/v1/io ---")
         print(host_http_io_output.strip())
+        print(f"--- host http GET /api/v1/mouse ---")
+        print(host_http_mouse_output.strip())
         print(f"--- host http POST /api/v1/leds on ---")
         print(host_http_led_on_output.strip())
         print(f"--- host http GET /api/v1/io after on ---")
@@ -742,6 +766,7 @@ def attempt_validation(attempt: int) -> bool:
             and host_http_status_doc["http"].get("port") == 80
             and isinstance(host_http_status_doc.get("network"), dict)
             and host_http_status_doc["network"].get("ipv4") == BOARD_IPV4_ADDR
+            and has_mouse_snapshot(host_http_status_doc.get("io"))
         )
         repeated_uptimes = [
             document.get("uptime_ms")
@@ -776,6 +801,10 @@ def attempt_validation(attempt: int) -> bool:
             and isinstance(host_http_io_doc, dict)
             and isinstance(host_http_io_doc.get("button"), dict)
             and extract_led_state(host_http_io_doc, "green") in {"on", "off"}
+            and has_mouse_snapshot(host_http_io_doc)
+        )
+        host_http_mouse_ok = host_http_mouse_ok and has_mouse_snapshot(
+            {"mouse": host_http_mouse_doc}
         )
         host_http_led_on_ok = (
             host_http_led_on_ok
@@ -819,6 +848,7 @@ def attempt_validation(attempt: int) -> bool:
         print(f"host_http_status_ok={host_http_status_ok}")
         print(f"host_http_status_repeat_ok={host_http_status_repeat_ok}")
         print(f"host_http_io_ok={host_http_io_ok}")
+        print(f"host_http_mouse_ok={host_http_mouse_ok}")
         print(f"host_http_led_on_ok={host_http_led_on_ok}")
         print(f"host_http_io_after_on_ok={host_http_io_after_on_ok}")
         print(f"host_http_led_off_ok={host_http_led_off_ok}")
@@ -842,6 +872,7 @@ def attempt_validation(attempt: int) -> bool:
             and host_http_status_ok
             and host_http_status_repeat_ok
             and host_http_io_ok
+            and host_http_mouse_ok
             and host_http_led_on_ok
             and host_http_io_after_on_ok
             and host_http_led_off_ok

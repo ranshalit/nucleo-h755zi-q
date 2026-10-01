@@ -19,6 +19,19 @@ int main(void)
 	assert(!usb_boot_mouse_decode(movement, 2, &report));
 	assert(!usb_boot_mouse_decode(NULL, 3, &report));
 	assert(!usb_boot_mouse_decode(movement, 3, NULL));
+	struct usb_boot_mouse_snapshot snapshot = {0};
+	const struct usb_boot_mouse_report click = { .buttons = 1, .x = 5, .y = -3,
+						    .wheel = 1 };
+
+	usb_boot_mouse_accumulate(&snapshot, &click);
+	usb_boot_mouse_accumulate(&snapshot, &click);
+	assert(snapshot.reports == 2 && snapshot.x == 10 && snapshot.y == -6);
+	assert(snapshot.wheel == 2 && snapshot.presses[0] == 1);
+	const struct usb_boot_mouse_report release = { .buttons = 0 };
+
+	usb_boot_mouse_accumulate(&snapshot, &release);
+	usb_boot_mouse_accumulate(&snapshot, &click);
+	assert(snapshot.presses[0] == 2 && snapshot.reports == 4);
 	puts("PASS: boot mouse reports");
 	return 0;
 }

@@ -22,10 +22,13 @@
 #include <zephyr/sys/util.h>
 
 #include "board_io.h"
+#include "usb_boot_mouse.h"
 #include "web_assets.h"
 
 #define BOARD_HTTP_PORT 80U
 #define JSON_RESPONSE_BUF_SIZE 1024
+#define DASHBOARD_RESPONSE_BUF_SIZE 2048
+#define MOUSE_RESPONSE_BUF_SIZE 256
 #define LED_POST_BUF_SIZE 64
 
 struct led_command {
@@ -45,6 +48,17 @@ static const struct http_header close_connection_headers[] = {
 	{
 		.name = "Connection",
 		.value = "close",
+	},
+};
+
+static const struct http_header mouse_response_headers[] = {
+	{
+		.name = "Connection",
+		.value = "close",
+	},
+	{
+		.name = "Cache-Control",
+		.value = "no-store",
 	},
 };
 
@@ -251,6 +265,22 @@ static int append_leds_json(char *buffer, size_t buffer_len, size_t *offset)
 	return append_to_buffer(buffer, buffer_len, offset, "]");
 }
 
+static int append_mouse_json(char *buffer, size_t buffer_len, size_t *offset,
+			     const char *prefix)
+{
+	struct usb_boot_mouse_snapshot mouse;
+
+	usb_boot_mouse_snapshot_get(&mouse);
+	return append_to_buffer(
+		buffer, buffer_len, offset,
+		"%s{\"connected\":%s,\"session\":%u,\"reports\":%u,"
+		"\"buttons\":%u,\"x\":%lld,\"y\":%lld,\"wheel\":%lld,"
+		"\"presses\":{\"left\":%u,\"right\":%u,\"middle\":%u}}",
+		prefix, json_bool(mouse.connected), mouse.session, mouse.reports, mouse.buttons,
+		(long long)mouse.x, (long long)mouse.y, (long long)mouse.wheel,
+		mouse.presses[0], mouse.presses[1], mouse.presses[2]);
+}
+
 static int build_io_json(char *buffer, size_t buffer_len)
 {
 	bool button_pressed;
@@ -270,6 +300,11 @@ static int build_io_json(char *buffer, size_t buffer_len)
 	}
 
 	ret = append_leds_json(buffer, buffer_len, &offset);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = append_mouse_json(buffer, buffer_len, &offset, ",\"mouse\":");
 	if (ret != 0) {
 		return ret;
 	}
@@ -501,11 +536,49 @@ static struct http_resource_detail_dynamic io_resource_detail = {
 	.user_data = NULL,
 };
 
+static int mouse_handler(struct http_client_ctx *client, enum http_data_status status,
+			 const struct http_request_ctx *request_ctx,
+			 struct http_response_ctx *response_ctx, void *user_data)
+{
+	static char __noinit mouse_response[MOUSE_RESPONSE_BUF_SIZE];
+	size_t offset = 0U;
+	int ret;
+
+	ARG_UNUSED(request_ctx);
+	ARG_UNUSED(user_data);
+
+	if (status != HTTP_SERVER_DATA_FINAL) {
+		return 0;
+	}
+
+	ret = append_mouse_json(mouse_response, sizeof(mouse_response), &offset, "");
+	if (ret != 0) {
+		return send_internal_error(client, response_ctx, mouse_response,
+					   sizeof(mouse_response));
+	}
+
+	populate_response(client, response_ctx, HTTP_200_OK, mouse_response, offset);
+	response_ctx->headers = mouse_response_headers;
+	response_ctx->header_count = ARRAY_SIZE(mouse_response_headers);
+	return 0;
+}
+
+static struct http_resource_detail_dynamic mouse_resource_detail = {
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_DYNAMIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_type = "application/json",
+		},
+	.cb = mouse_handler,
+	.user_data = NULL,
+};
+
 static int dashboard_handler(struct http_client_ctx *client, enum http_data_status status,
 			     const struct http_request_ctx *request_ctx,
 			     struct http_response_ctx *response_ctx, void *user_data)
 {
-	static char __noinit dashboard_response[JSON_RESPONSE_BUF_SIZE];
+	static char __noinit dashboard_response[DASHBOARD_RESPONSE_BUF_SIZE];
 	int ret;
 
 	ARG_UNUSED(client);
@@ -647,6 +720,7 @@ HTTP_RESOURCE_DEFINE(dashboard_api_resource, board_http_service, "/api/v1/dashbo
 		     &dashboard_resource_detail);
 HTTP_RESOURCE_DEFINE(status_resource, board_http_service, "/api/v1/status", &status_resource_detail);
 HTTP_RESOURCE_DEFINE(io_resource, board_http_service, "/api/v1/io", &io_resource_detail);
+HTTP_RESOURCE_DEFINE(mouse_resource, board_http_service, "/api/v1/mouse", &mouse_resource_detail);
 HTTP_RESOURCE_DEFINE(leds_resource, board_http_service, "/api/v1/leds", &leds_resource_detail);
 
 int board_http_server_start(void)

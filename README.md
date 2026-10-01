@@ -250,6 +250,7 @@ address:
 - browser dashboard: `http://192.168.55.2/`
 - board/network status: `http://192.168.55.2/api/v1/status`
 - current button/LED state: `http://192.168.55.2/api/v1/io`
+- low-latency USB mouse snapshot: `http://192.168.55.2/api/v1/mouse`
 - LED control: `POST http://192.168.55.2/api/v1/leds`
 - dashboard assets: `http://192.168.55.2/styles.css` and `http://192.168.55.2/app.js`
 
@@ -258,6 +259,7 @@ show:
 
 - live board/network status
 - current user-button state
+- USB mouse movement, wheel distance, held buttons, and click counts
 - live LED state cards
 - per-LED `On`, `Off`, and `Toggle` controls from the browser
 
@@ -285,6 +287,16 @@ LEDs are observable immediately but may be superseded by the next blink toggle.
 Green is the stable LED used by the validation flow for deterministic write/read
 checks. The dashboard reflects that same behavior: yellow and red are live but
 can change again on their own because of the background blink threads.
+
+Connect a boot-protocol USB mouse directly to USER USB CN13 and run `usbhost
+resume` on the ST-LINK UART. The dashboard's USB mouse card shows a cursor
+moving within its pad, held left/right/middle buttons, press counts, wheel
+total, and report count. These values also appear under `io.mouse` in
+`/api/v1/io` and `/api/v1/status`. The mouse card polls the small
+`/api/v1/mouse` snapshot about every 100 ms after each response,
+independently of the 1.5-second board-status refresh. Movement and press
+counts accumulate between page updates; they reset on mouse reconnect.
+This displays input from the board, not a host-computer mouse or keyboard.
 
 `scripts/flash_zephyr_hello_shell.sh` now validates the HTTP endpoints in
 addition to the existing boot, shell, and Ethernet checks.

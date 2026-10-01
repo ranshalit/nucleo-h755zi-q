@@ -13,8 +13,22 @@ struct usb_boot_mouse_report {
 	int8_t wheel;
 };
 
+struct usb_boot_mouse_snapshot {
+	bool connected;
+	uint32_t session;
+	uint32_t reports;
+	uint8_t buttons;
+	int64_t x;
+	int64_t y;
+	int64_t wheel;
+	uint32_t presses[3];
+};
+
 bool usb_boot_mouse_decode(const uint8_t *data, size_t length,
 			   struct usb_boot_mouse_report *report);
+void usb_boot_mouse_accumulate(struct usb_boot_mouse_snapshot *snapshot,
+			       const struct usb_boot_mouse_report *report);
+void usb_boot_mouse_snapshot_get(struct usb_boot_mouse_snapshot *snapshot);
 bool usb_boot_mouse_last_report(struct usb_boot_mouse_report *report,
 				uint32_t *count);
 
