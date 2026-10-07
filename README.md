@@ -288,8 +288,9 @@ Green is the stable LED used by the validation flow for deterministic write/read
 checks. The dashboard reflects that same behavior: yellow and red are live but
 can change again on their own because of the background blink threads.
 
-Connect a boot-protocol USB mouse directly to USER USB CN13 and run `usbhost
-resume` on the ST-LINK UART. The dashboard's USB mouse card shows a cursor
+Connect a boot-protocol USB mouse directly to USER USB CN13; USB host polling
+starts automatically at boot (`usbhost pause`/`resume` on the ST-LINK UART
+toggle it for debugging). The dashboard's USB mouse card shows a cursor
 moving within its pad, held left/right/middle buttons, press counts, wheel
 total, and report count. These values also appear under `io.mouse` in
 `/api/v1/io` and `/api/v1/status`. The mouse card polls the small

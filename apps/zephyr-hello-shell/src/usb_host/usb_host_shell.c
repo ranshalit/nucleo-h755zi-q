@@ -22,7 +22,7 @@ extern USBH_ClassTypeDef usb_boot_mouse_class;
 
 K_THREAD_STACK_DEFINE(usb_host_poll_stack, USB_HOST_POLL_THREAD_STACK_SIZE);
 static struct k_thread usb_host_poll_thread;
-static atomic_t usb_host_poll_paused = ATOMIC_INIT(1);
+static atomic_t usb_host_poll_paused = ATOMIC_INIT(0);
 static atomic_t usb_host_poll_busy = ATOMIC_INIT(0);
 static USBH_HandleTypeDef usb_host;
 static int usb_host_init_result = -EAGAIN;
@@ -414,12 +414,9 @@ static int cmd_usbhost_rawtest(const struct shell *shell, size_t argc, char **ar
 	 * the raw test has the bus to itself, matching the bare-metal A/B
 	 * test's conditions exactly (nothing else driving the core).
 	 *
-	 * The poll thread now starts paused by default (see
-	 * usb_host_poll_paused's initializer), so if this command is the
-	 * first USB host activity since boot, the core has never seen a
-	 * channel-0 transaction at all - matching bare-metal even more
-	 * closely than just pausing mid-stream. Use `usbhost resume` first
-	 * if you want the normal enumeration flow running before this test.
+	 * The poll thread runs by default so attached devices enumerate at
+	 * boot. Run `usbhost pause` and reset the device first if this test
+	 * needs a core that has never seen a channel-0 transaction.
 	 */
 	atomic_set(&usb_host_poll_paused, 1);
 	k_msleep(5); /* let any in-flight USBH_Process() iteration finish */

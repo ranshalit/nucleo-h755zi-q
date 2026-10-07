@@ -447,6 +447,18 @@ def read_until(ser: serial.Serial, timeout_sec: float, patterns: tuple[str, ...]
             time.sleep(0.05)
     return "".join(chunks)
 
+def read_until_quiet(ser: serial.Serial, quiet_sec: float = 1.5, max_sec: float = 10.0) -> str:
+    """Drain boot-time logs (e.g. USB host enumeration) so they don't interleave with shell checks."""
+    deadline = time.time() + max_sec
+    last_data = time.time()
+    chunks: list[str] = []
+    while time.time() < deadline and time.time() - last_data < quiet_sec:
+        data = ser.read(ser.in_waiting or 1)
+        if data:
+            chunks.append(data.decode("utf-8", "replace"))
+            last_data = time.time()
+    return "".join(chunks)
+
 def run_shell_command(ser: serial.Serial, command: str, timeout_sec: float = 6.0) -> str:
     ser.reset_input_buffer()
     payload = "\n" if not command else f"{command}\n"
@@ -593,6 +605,8 @@ def attempt_validation(attempt: int) -> bool:
 
             if "Hello World!" in transcript and "uart:~$" in transcript:
                 break
+
+        transcript += read_until_quiet(ser)
 
         print("--- transcript ---")
         print(transcript.strip())
