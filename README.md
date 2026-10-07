@@ -362,10 +362,10 @@ generated offline from a source video with:
 
 ```bash
 python3 scripts/convert_video_to_mjpeg_frames.py \
-  --input ~/Downloads/videoplayback.mp4 \
+  --input ~/Downloads/3842258-uhd_3840_2160_30fps.mp4 \
   --output-dir apps/zephyr-hello-shell/src \
-  --width 320 --height 240 --fps 8 --duration 6 --start 0 \
-  --jpeg-quality 6 --flash-budget-bytes 524288 --var-prefix camera_frame
+  --width 320 --height 180 --fps 8 --duration 6 --start 0 \
+  --jpeg-quality 7 --flash-budget-bytes 524288 --var-prefix camera_frame
 ```
 
 Re-run this command (and rebuild/reflash) to change the clip. The script
