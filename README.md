@@ -345,8 +345,17 @@ dashboard so viewing the stream never blocks LED/board-IO requests:
 - stream URL: `http://192.168.55.2:8081/`
 
 Open that URL directly in VLC (`Media > Open Network Stream`) or with
-`ffplay http://192.168.55.2:8081/` to view the loop. A convenience link is
-also shown on the dashboard (`http://192.168.55.2/`).
+`ffplay http://192.168.55.2:8081/` to view the loop. The dashboard
+(`http://192.168.55.2/`) also has a Camera panel with a Show/Hide button
+(hidden by default). It embeds the same port-8081 stream, so the video still
+comes from its own thread rather than the port-80 server. The stream serves
+one viewer at a time: hide it in the dashboard before opening it in VLC.
+Hiding disconnects the browser so the next viewer can connect.
+
+The network stack is sized for this (`CONFIG_NET_MAX_CONTEXTS=12`,
+`CONFIG_NET_MAX_CONN=12`). With the default 6 TCP contexts, an active stream
+used up the pool and the dashboard intermittently showed
+`Request to /api/v1/io failed (0)`.
 
 The frame data comes from `apps/zephyr-hello-shell/src/camera_frames.c`,
 generated offline from a source video with:
