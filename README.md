@@ -329,6 +329,10 @@ as `io.temperature` (`{"available":true,"source":"mcu_die","celsius":34.2}`)
 and sampled at most once per second. This is chip junction temperature, so it
 reads above ambient.
 
+Device status values briefly glow (~1 s) whenever they change, so updates such
+as a temperature tick or a link-state change stand out. Uptime is excluded
+because it changes on every refresh.
+
 `scripts/flash_zephyr_hello_shell.sh` now validates the HTTP endpoints in
 addition to the existing boot, shell, and Ethernet checks.
 
