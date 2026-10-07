@@ -1,7 +1,3 @@
-&eth_phy {
-	no-reset;
-};
-
 &gpiod {
 	usb_vbus_disable {
 		gpio-hog;
