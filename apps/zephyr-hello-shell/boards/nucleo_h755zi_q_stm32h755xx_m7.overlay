@@ -6,3 +6,14 @@
 		line-name = "USB VBUS disable (active-low enable)";
 	};
 };
+
+/* MCU internal die temperature sensor (ADC3 channel 18, factory calibrated). */
+&adc3 {
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <4>;
+	status = "okay";
+};
+
+&die_temp {
+	status = "okay";
+};

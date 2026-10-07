@@ -269,7 +269,7 @@ address:
 
 - browser dashboard: `http://192.168.55.2/`
 - board/network status: `http://192.168.55.2/api/v1/status`
-- current button/LED state: `http://192.168.55.2/api/v1/io`
+- current button/LED/mouse/die-temperature state: `http://192.168.55.2/api/v1/io`
 - low-latency USB mouse snapshot: `http://192.168.55.2/api/v1/mouse`
 - LED control: `POST http://192.168.55.2/api/v1/leds`
 - dashboard assets: `http://192.168.55.2/styles.css` and `http://192.168.55.2/app.js`
@@ -321,6 +321,13 @@ mouse card, so every 400 ms / 700 ms blink toggle is shown. Network status and
 uptime use a separate 1.5-second `/api/v1/status` refresh. Movement and press
 counts accumulate between page updates; they reset on mouse reconnect.
 This displays input from the board, not a host-computer mouse or keyboard.
+
+The board has no dedicated temperature sensor, so the dashboard's "MCU die
+temp" card shows the STM32H755 internal die sensor (ADC3 channel 18,
+factory-calibrated at 30 °C / 110 °C; Zephyr node `die_temp`). It is exposed
+as `io.temperature` (`{"available":true,"source":"mcu_die","celsius":34.2}`)
+and sampled at most once per second. This is chip junction temperature, so it
+reads above ambient.
 
 `scripts/flash_zephyr_hello_shell.sh` now validates the HTTP endpoints in
 addition to the existing boot, shell, and Ethernet checks.
