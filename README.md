@@ -110,6 +110,26 @@ PROG=/opt/st/stm32cubeide_2.1.1/plugins/com.st.stm32cube.ide.mcu.externaltools.c
   -ob BCM4=0 BCM7=1 BOOT_CM7_ADD0=0x800 BOOT_CM4_ADD0=0x810
 ```
 
+### Reboot (hardware reset over ST-LINK)
+
+Reset the board without unplugging anything; `/dev/ttyACM0` stays open, so a
+running serial monitor keeps logging the new boot:
+
+```bash
+/opt/st/stm32cubeide_2.1.1/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.400.202601091506/tools/bin/STM32_Programmer_CLI -c port=SWD mode=UR -hardRst
+```
+
+This pulses NRST (same as pressing B2 RESET, requires JP3 `T_NRST` fitted).
+It is a reset, not a power cycle: supplies stay on, but the MCU and the
+LAN8742 Ethernet PHY (whose reset is tied to NRST) both restart.
+
+When powering from external 5V (JP2 on 5-6), UM2408 §7.4.6 says to apply 5V
+before connecting the ST-LINK USB. If 5V is cycled with the ST-LINK still
+connected, the board may glitch during power-up (a doubled
+`*** Booting Zephyr OS build ***` banner). The firmware soft-resets the PHY at
+init so Ethernet still comes up; if anything else looks wrong, run the reset
+command above.
+
 ### Serial validation
 
 With the programmed image running, `/dev/ttyACM0` at `115200 8N1` should show:
@@ -293,9 +313,10 @@ starts automatically at boot (`usbhost pause`/`resume` on the ST-LINK UART
 toggle it for debugging). The dashboard's USB mouse card shows a cursor
 moving within its pad, held left/right/middle buttons, press counts, wheel
 total, and report count. These values also appear under `io.mouse` in
-`/api/v1/io` and `/api/v1/status`. The mouse card polls the small
-`/api/v1/mouse` snapshot about every 100 ms after each response,
-independently of the 1.5-second board-status refresh. Movement and press
+`/api/v1/io` and `/api/v1/status`. The dashboard polls `/api/v1/io` about
+every 100 ms after each response, which drives the button, LED cards, and
+mouse card, so every 400 ms / 700 ms blink toggle is shown. Network status and
+uptime use a separate 1.5-second `/api/v1/status` refresh. Movement and press
 counts accumulate between page updates; they reset on mouse reconnect.
 This displays input from the board, not a host-computer mouse or keyboard.
 
