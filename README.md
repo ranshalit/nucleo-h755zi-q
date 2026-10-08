@@ -69,6 +69,7 @@ build directories so their network configurations stay independent.
 Build both profiles from the repository root:
 
 ```bash
+export PATH="$HOME/.local/bin:$PATH"
 REPO_ROOT="$PWD"
 APP_DIR="${REPO_ROOT}/apps/zephyr-hello-shell"
 ZEPHYR_DIR="${REPO_ROOT}/vendor/zephyrproject/zephyr"
