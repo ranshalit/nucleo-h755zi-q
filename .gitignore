@@ -5,3 +5,4 @@ vendor/reference/stm32cubeh7/Projects/**/STM32CubeIDE/**/.settings/language.sett
 
 .worktrees/
 vendor/zephyrproject/
+/build/

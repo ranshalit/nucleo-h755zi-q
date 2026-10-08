@@ -1,0 +1,53 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Zephyr M7: build",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/flash_zephyr_hello_shell.sh",
+            "args": [
+                "--build-only",
+                "--build-dir",
+                "${workspaceFolder}/build/zephyr-hello-shell"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Zephyr M7: flash",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/flash_zephyr_hello_shell.sh",
+            "args": [
+                "--flash-only",
+                "--skip-validate",
+                "--build-dir",
+                "${workspaceFolder}/build/zephyr-hello-shell"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Zephyr M7: build and flash",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Zephyr M7: build",
+                "Zephyr M7: flash"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Zephyr M7 (ST-LINK, build and debug)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/zephyr-hello-shell/zephyr/zephyr.elf",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceFolder}/scripts/gdb_zephyr_hello_shell.sh",
+            "miDebuggerServerAddress": "localhost:3333",
+            "useExtendedRemote": true,
+            "stopAtConnect": true,
+            "launchCompleteCommand": "None",
+            "preLaunchTask": "Zephyr M7: build and flash",
+            "debugServerPath": "${workspaceFolder}/scripts/debug_zephyr_hello_shell.sh",
+            "debugServerArgs": "--connect-under-reset",
+            "serverStarted": "Listening on port 3333 for gdb connections",
+            "filterStderr": true,
+            "serverLaunchTimeout": 30000
+        }
+    ]
+}

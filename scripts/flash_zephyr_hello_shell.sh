@@ -10,7 +10,7 @@ APP_DIR="${ZEPHYR_APP_DIR:-${REPO_ROOT}/apps/zephyr-hello-shell}"
 BUILD_DIR="${ZEPHYR_BUILD_DIR:-/tmp/stm32h7-zephyr-hello-shell}"
 BOARD="${ZEPHYR_BOARD:-nucleo_h755zi_q/stm32h755xx/m7}"
 WEST_BIN="${WEST_BIN:-west}"
-PROGRAMMER="${STM32_PROGRAMMER_CLI:-/opt/st/stm32cubeide_2.1.1/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.400.202601091506/tools/bin/STM32_Programmer_CLI}"
+PROGRAMMER="${STM32_PROGRAMMER_CLI:-}"
 SWD_FREQ="${STM32_PROGRAMMER_SWD_FREQ:-8000}"
 PORT="${ZEPHYR_UART_PORT:-}"
 VALIDATION_RETRIES="${ZEPHYR_UART_VALIDATION_RETRIES:-3}"
@@ -172,7 +172,17 @@ done
 
 [[ -d "${ZEPHYR_BASE}" ]] || die "Zephyr base not found: ${ZEPHYR_BASE}"
 [[ -d "${APP_DIR}" ]] || die "Zephyr app not found: ${APP_DIR}"
-[[ -x "${PROGRAMMER}" ]] || die "STM32_Programmer_CLI not found: ${PROGRAMMER}"
+if [[ "${DO_FLASH}" -eq 1 || "${DO_VALIDATE}" -eq 1 ]]; then
+  if [[ -z "${PROGRAMMER}" ]]; then
+    for candidate in /opt/st/stm32cubeide_*/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_*/tools/bin/STM32_Programmer_CLI; do
+      if [[ -x "${candidate}" ]]; then
+        PROGRAMMER="${candidate}"
+        break
+      fi
+    done
+  fi
+  [[ -n "${PROGRAMMER}" && -x "${PROGRAMMER}" ]] || die "STM32_Programmer_CLI not found; set STM32_PROGRAMMER_CLI (found: ${PROGRAMMER:-none})"
+fi
 command -v "${WEST_BIN}" >/dev/null 2>&1 || die "west not found: ${WEST_BIN}"
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
 

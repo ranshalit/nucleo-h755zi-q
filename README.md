@@ -163,6 +163,106 @@ Yellow and red should continue blinking independently after boot, and
 `scripts/flash_zephyr_hello_shell.sh` now validates that behavior by sampling
 their shell-reported states over time on the connected board.
 
+### Debugging
+
+#### Shell debugging (ST-LINK / OpenOCD / GDB)
+
+Use the board's built-in ST-LINK/V3 to debug the Zephyr Cortex-M7 app. No
+SEGGER probe is needed. Build and flash the app as above first; use the ELF
+from the **same build** as the running image so symbols match. On this host,
+STM32CubeIDE supplies OpenOCD and its STM32H7 target scripts. The OpenOCD
+installation does not include the `stm32h745i-disco.cfg` board file referenced
+by Zephyr's board config, so `west attach --runner openocd` does not work with
+that installation. The repo-owned config at
+`scripts/stm32h755zi_cm7.openocd.cfg` instead uses the installed ST-LINK and
+STM32H7 target scripts without modifying vendored Zephyr.
+
+In terminal 1, from the repository root, start the GDB server:
+
+```bash
+scripts/debug_zephyr_hello_shell.sh
+```
+
+If STM32CubeIDE is installed elsewhere, set `STM32_OPENOCD` to its `openocd`
+binary and `STM32_OPENOCD_SCRIPTS` to its `st_scripts` directory. The helper
+reports missing tools or scripts. Stop any other OpenOCD/GDB session first;
+only one process can use the ST-LINK probe at a time. If you start it within a
+few seconds of flashing and OpenOCD logs `Examination failed`, wait a few
+seconds and restart it, or use `--connect-under-reset` (resets the MCU).
+
+In terminal 2, connect GDB to the already running image (no reflash), using
+the ELF from the same build. For the VS Code workspace build described below:
+
+```bash
+scripts/gdb_zephyr_hello_shell.sh \
+  build/zephyr-hello-shell/zephyr/zephyr.elf
+```
+
+Loading the ELF only loads symbols into GDB; it does **not** connect to the
+board. At the `(gdb)` prompt, enter these commands in order. Wait for
+`Remote debugging using localhost:3333` and a source location after the first
+command before using `monitor` (otherwise GDB reports `"monitor" command not
+supported by this target`):
+
+```gdb
+target extended-remote localhost:3333
+break main
+monitor reset halt
+continue
+```
+
+Attaching halts M7. `main` has already run if you attach to a running app, so
+reset before continuing to hit its breakpoint; a reset also restarts the app
+and network connections. When the breakpoint hits, use `bt` to inspect the
+call stack. Use `Ctrl-C` in GDB to interrupt a running target,
+`next` or `step` to inspect execution, `continue` to resume, and `detach` to
+leave it running. Stop the OpenOCD server with `Ctrl-C` in terminal 1. This
+app is built with speed optimizations, so some variables may be reported as
+`<optimized out>` and source stepping may jump. Debugging M4 is not covered by
+this M7 configuration.
+
+#### VS Code debugging (build, flash, and debug)
+
+Open the **repository root** as the VS Code workspace. Install the Microsoft
+**C/C++** extension and connect the board's ST-LINK USB. The workspace tasks
+use the Zephyr SDK, `west`, and STM32CubeProgrammer; the debugger uses
+STM32CubeIDE's OpenOCD and the SDK's GDB. Stop any other GDB/OpenOCD or
+STM32CubeProgrammer session using the ST-LINK before starting.
+
+1. **Build only:** select **Terminal > Run Build Task** (`Ctrl+Shift+B`), which
+   runs **Zephyr M7: build**. This needs no board. It creates
+   `build/zephyr-hello-shell/zephyr/zephyr.elf` and `.hex` under the workspace,
+   not `/tmp`; `build/` is ignored by Git.
+2. **Flash only:** after a successful build, select **Terminal > Run Task >
+   Zephyr M7: flash**. This programs the workspace build through the ST-LINK,
+   without running serial/network validation. The board must be connected.
+3. **Build, flash, and debug in one step:** select **Run and Debug >
+   Zephyr M7 (ST-LINK, build and debug)** and press F5. Its pre-launch task
+   builds and flashes in that order, then VS Code starts OpenOCD with
+   `--connect-under-reset`, connects GDB to port 3333 using the newly built
+   ELF, and pauses M7 at the reset vector. You do **not** need to start
+   OpenOCD separately for this configuration. A build or flash failure stops
+   the launch; inspect the task's terminal output. Connecting under reset is
+   required here: immediately after STM32CubeProgrammer starts the app, a
+   plain attach fails with `[stm32h7x.cm7] Examination failed` and VS Code
+   reports `Remote connection closed`. It needs JP3 `T_NRST` fitted.
+4. **Use breakpoints:** set one in
+   `apps/zephyr-hello-shell/src/main.c`, then press F5 to continue; the
+   session starts at reset, so `main` breakpoints hit without an extra reset.
+   To restart, enter `-exec monitor reset halt` in VS Code's **Debug
+   Console**. Reset restarts the app and network connections. Inspect
+   Variables, Watch, Call Stack, and Breakpoints; use F10/F11 to step. Stop
+   the debug session when finished.
+
+The build task finds `west` under `~/.local/bin` and the SDK under
+`~/.local/zephyr-sdk-*`. The debugger launchers find STM32CubeIDE's OpenOCD
+scripts and SDK GDB. For nonstandard installs, set `ZEPHYR_SDK_ROOT`,
+`STM32_PROGRAMMER_CLI`, `STM32_OPENOCD`, `STM32_OPENOCD_SCRIPTS`, or
+`ZEPHYR_GDB` in the VS Code environment. If flashing reports
+`DEV_USB_COMM_ERR` or OpenOCD reports `read version failed`, the ST-LINK is
+not communicating; the ELF can still be built, but hardware debugging cannot
+start until the probe connection works.
+
 ### Boot-time measurement
 
 When measuring boot time for this Zephyr image, exclude flash/programming time

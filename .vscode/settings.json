@@ -10,6 +10,5 @@
         ".specify/scripts/bash/": true,
         ".specify/scripts/powershell/": true
     },
-    "cmake.sourceDirectory": "/home/ranshal/project/stm32h7/apps/zephyr-hello-shell"
+    "cmake.sourceDirectory": "${workspaceFolder}/apps/zephyr-hello-shell"
 }
-
