@@ -10,6 +10,7 @@ if(BOARD STREQUAL "nucleo_h755zi_q/stm32h755xx/m7")
   set(board_sources
     src/boot_optimizations.c
     src/board_io.c
+    src/board_temperature_nucleo.c
     src/usb_host/stm32_hcd_adapter.c
     src/usb_host/usb_gpio_capture.c
     src/usb_host/usb_host_shell.c
@@ -25,6 +26,7 @@ if(BOARD STREQUAL "nucleo_h755zi_q/stm32h755xx/m7")
 elseif(BOARD STREQUAL "native_sim/native/64")
   set(board_sources
     src/board_io_native_sim.c
+    src/board_temperature_native_sim.c
     src/usb_host/usb_host_native_sim.c
   )
   set(board_compile_definitions APP_NATIVE_SIM)

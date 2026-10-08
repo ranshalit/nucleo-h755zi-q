@@ -11,8 +11,6 @@
 #include <string.h>
 
 #include <zephyr/data/json.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/http/parser.h>
 #include <zephyr/net/http/server.h>
@@ -24,6 +22,7 @@
 #include <zephyr/sys/util.h>
 
 #include "board_io.h"
+#include "board_temperature.h"
 #include "usb_boot_mouse.h"
 #include "web_assets.h"
 
@@ -283,67 +282,26 @@ static int append_mouse_json(char *buffer, size_t buffer_len, size_t *offset,
 		mouse.presses[0], mouse.presses[1], mouse.presses[2]);
 }
 
-#define DIE_TEMP_NODE DT_NODELABEL(die_temp)
-#define DIE_TEMP_REFRESH_MS 1000
-
-/* The dashboard polls /api/v1/io every 100 ms; sample the ADC at most once per second. */
-static int read_die_temp_milli(int32_t *milli_c)
-{
-#if DT_NODE_HAS_STATUS_OKAY(DIE_TEMP_NODE)
-	static const struct device *const dev = DEVICE_DT_GET(DIE_TEMP_NODE);
-	static K_MUTEX_DEFINE(lock);
-	static int64_t last_ms;
-	static int32_t cached_milli;
-	static int cached_ret = -EAGAIN;
-	struct sensor_value val;
-	int64_t now = k_uptime_get();
-	int ret;
-
-	if (!device_is_ready(dev)) {
-		return -ENODEV;
-	}
-
-	k_mutex_lock(&lock, K_FOREVER);
-	if (cached_ret != 0 || (now - last_ms) >= DIE_TEMP_REFRESH_MS) {
-		ret = sensor_sample_fetch(dev);
-		if (ret == 0) {
-			ret = sensor_channel_get(dev, SENSOR_CHAN_DIE_TEMP, &val);
-		}
-		if (ret == 0) {
-			cached_milli = (int32_t)sensor_value_to_milli(&val);
-		}
-		cached_ret = ret;
-		last_ms = now;
-	}
-	*milli_c = cached_milli;
-	ret = cached_ret;
-	k_mutex_unlock(&lock);
-
-	return ret;
-#else
-	ARG_UNUSED(milli_c);
-	return -ENOTSUP;
-#endif
-}
-
 static int append_temperature_json(char *buffer, size_t buffer_len, size_t *offset,
 				   const char *prefix)
 {
-	int32_t milli_c;
+	struct board_temperature temperature;
 	int32_t tenths;
 	int32_t magnitude;
 
-	if (read_die_temp_milli(&milli_c) != 0) {
+	if (board_temperature_get(&temperature) != 0) {
 		return append_to_buffer(buffer, buffer_len, offset,
 					"%s{\"available\":false}", prefix);
 	}
 
-	tenths = (milli_c >= 0) ? (milli_c + 50) / 100 : (milli_c - 50) / 100;
+	tenths = (temperature.milli_celsius >= 0) ?
+			 (temperature.milli_celsius + 50) / 100 :
+			 (temperature.milli_celsius - 50) / 100;
 	magnitude = (tenths < 0) ? -tenths : tenths;
 	return append_to_buffer(buffer, buffer_len, offset,
-				"%s{\"available\":true,\"source\":\"mcu_die\",\"celsius\":%s%d.%d}",
-				prefix, (tenths < 0) ? "-" : "", (int)(magnitude / 10),
-				(int)(magnitude % 10));
+				"%s{\"available\":true,\"source\":\"%s\",\"celsius\":%s%d.%d}",
+				prefix, temperature.source, (tenths < 0) ? "-" : "",
+				(int)(magnitude / 10), (int)(magnitude % 10));
 }
 
 static int build_io_json(char *buffer, size_t buffer_len)
