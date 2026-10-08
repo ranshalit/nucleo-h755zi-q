@@ -66,7 +66,32 @@ This uses the host toolchain; it simulates application behavior, not the
 STM32H755 or its peripherals. The TAP and localhost profiles use separate
 build directories so their network configurations stay independent.
 
-Build both profiles from the repository root:
+Build and run from any directory using the repository's script:
+
+```bash
+scripts/run_zephyr_hello_shell_native.sh
+```
+
+This builds the localhost profile with `west build`, then runs its host
+executable in the foreground. Open `http://127.0.0.1:8080/` in a browser.
+Press Ctrl+C to stop it. Other options:
+
+```bash
+scripts/run_zephyr_hello_shell_native.sh --build-only
+scripts/run_zephyr_hello_shell_native.sh --run-only
+scripts/run_zephyr_hello_shell_native.sh --profile tap
+scripts/run_zephyr_hello_shell_native.sh --profile tap --build-only
+scripts/run_zephyr_hello_shell_native.sh --build-dir /tmp/my-native-build
+```
+
+The TAP profile requires a host TAP interface configured separately as
+`192.168.55.100/24`; the script does not modify host networking. `--run-only`
+requires a successful earlier build of the selected profile. Set `WEST_BIN`
+if `west` is not on `PATH`. The script derives the application and Zephyr
+paths from its own location, so it works from a worktree or after merging
+into the main checkout.
+
+To build manually instead, run these commands from the repository root:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -110,10 +135,34 @@ No TAP interface or host network reconfiguration is needed.
 
 The TAP profile uses Zephyr's native TAP Ethernet driver and Zephyr's normal
 IPv4/TCP stack. It uses `192.168.55.2/24` for the simulated board and expects
-the host TAP interface at `192.168.55.100/24`. Set up TAP with Zephyr
-`net-tools` and configure the host TAP interface before running the TAP
-executable; the TAP profile will not work until that interface is available.
-The board-side dashboard uses `http://192.168.55.2/`.
+the host TAP interface at `192.168.55.100/24`. No Ethernet cable or physical
+board is needed. On Linux, check whether `zeth` already exists:
+
+```bash
+ip -brief addr show dev zeth
+```
+
+If it does not exist, create and configure it (requires `sudo`):
+
+```bash
+sudo ip tuntap add dev zeth mode tap user "$(id -un)"
+sudo ip addr add 192.168.55.100/24 dev zeth
+sudo ip link set zeth up
+```
+
+If `zeth` already exists, do not recreate it; add the address or bring it up
+only if needed. Start the simulator after the interface is configured, or
+restart it if it was already running:
+
+```bash
+scripts/run_zephyr_hello_shell_native.sh --profile tap
+```
+
+In another terminal, check `ping 192.168.55.2` and open
+`http://192.168.55.2/`. The script does not configure or remove the host TAP
+interface. When finished, stop the simulator with Ctrl+C; if you created
+`zeth` solely for this run, remove it with
+`sudo ip tuntap del dev zeth mode tap`. Do not remove a pre-existing interface.
 
 #### Simulation differences
 
