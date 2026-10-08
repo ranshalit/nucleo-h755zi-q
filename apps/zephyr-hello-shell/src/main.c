@@ -167,7 +167,20 @@ SHELL_CMD_REGISTER(leds, &sub_leds, "Control the user LEDs (LD1/LD2/LD3)", NULL)
 
 int main(void)
 {
+	const char *http_host;
 	int ret = board_io_init();
+
+#if defined(CONFIG_ARCH_POSIX)
+#if defined(CONFIG_NET_NATIVE_OFFLOADED_SOCKETS)
+	http_host = "127.0.0.1";
+#elif defined(CONFIG_ETH_NATIVE_TAP)
+	http_host = CONFIG_NET_CONFIG_MY_IPV4_ADDR;
+#else
+#error "native_sim requires TAP or offloaded-socket networking"
+#endif
+#else
+	http_host = CONFIG_NET_CONFIG_MY_IPV4_ADDR;
+#endif
 
 	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
 	printf("Build time: %s\n", APP_BUILD_TIMESTAMP);
@@ -194,7 +207,7 @@ int main(void)
 	}
 
 	printf("HTTP server listening on http://%s:%u/\n",
-	       CONFIG_NET_CONFIG_MY_IPV4_ADDR, board_http_server_port());
+	       http_host, board_http_server_port());
 
 	ret = board_usb_host_start();
 	if (ret != 0) {
@@ -216,7 +229,7 @@ int main(void)
 		/* Non-fatal: continue running LEDs/HTTP even if the stream failed. */
 	} else {
 		printf("Camera stream listening on http://%s:%u/\n",
-		       CONFIG_NET_CONFIG_MY_IPV4_ADDR, camera_stream_port());
+		       http_host, camera_stream_port());
 	}
 
 	return 0;

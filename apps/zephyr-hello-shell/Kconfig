@@ -1,5 +1,12 @@
 source "Kconfig.zephyr"
 
+config APP_HTTP_PORT
+	int "Application HTTP server port"
+	range 1 65535
+	default 80
+	help
+	  TCP port used by the application dashboard and API.
+
 config APP_USB_HOST_HCD
 	bool "Enable STM32 USB host controller (HCD) support"
 	default n

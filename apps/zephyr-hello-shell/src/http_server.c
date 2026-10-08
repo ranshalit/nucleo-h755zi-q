@@ -26,7 +26,6 @@
 #include "usb_boot_mouse.h"
 #include "web_assets.h"
 
-#define BOARD_HTTP_PORT 80U
 #define JSON_RESPONSE_BUF_SIZE 1024
 #define DASHBOARD_RESPONSE_BUF_SIZE 2048
 #define MOUSE_RESPONSE_BUF_SIZE 256
@@ -42,7 +41,7 @@ static const struct json_obj_descr led_command_descr[] = {
 	JSON_OBJ_DESCR_PRIM(struct led_command, action, JSON_TOK_STRING_BUF),
 };
 
-static uint16_t board_http_port = BOARD_HTTP_PORT;
+static uint16_t board_http_port = CONFIG_APP_HTTP_PORT;
 static bool http_server_started;
 
 static const struct http_header close_connection_headers[] = {
@@ -351,6 +350,11 @@ static int build_status_json(char *buffer, size_t buffer_len)
 	char ipv4_addr[NET_IPV4_ADDR_LEN];
 	char netmask[NET_IPV4_ADDR_LEN];
 	char gateway[NET_IPV4_ADDR_LEN];
+	const char *peer_ipv4;
+	bool admin_up = false;
+	bool is_up = false;
+	bool carrier = false;
+	enum net_if_oper_state oper_state = NET_IF_OPER_UNKNOWN;
 	static char __noinit io_json[JSON_RESPONSE_BUF_SIZE];
 	struct in_addr *iface_addr = NULL;
 	struct in_addr iface_netmask = { 0 };
@@ -364,7 +368,19 @@ static int build_status_json(char *buffer, size_t buffer_len)
 			iface_netmask = net_if_ipv4_get_netmask_by_addr(iface, iface_addr);
 		}
 		iface_gateway = net_if_ipv4_get_gw(iface);
+		admin_up = net_if_is_admin_up(iface);
+		is_up = net_if_is_up(iface);
+		carrier = net_if_is_carrier_ok(iface);
+		oper_state = net_if_oper_state(iface);
 	}
+
+#if defined(CONFIG_NET_NATIVE_OFFLOADED_SOCKETS)
+	peer_ipv4 = "127.0.0.1";
+#elif defined(CONFIG_NET_CONFIG_PEER_IPV4_ADDR)
+	peer_ipv4 = CONFIG_NET_CONFIG_PEER_IPV4_ADDR;
+#else
+	peer_ipv4 = "unassigned";
+#endif
 
 	ipv4_to_string_or_default(iface_addr, ipv4_addr, sizeof(ipv4_addr));
 	ipv4_to_string_or_default(&iface_netmask, netmask, sizeof(netmask));
@@ -382,10 +398,8 @@ static int build_status_json(char *buffer, size_t buffer_len)
 		"\"peer_ipv4\":\"%s\",\"admin_up\":%s,\"up\":%s,\"carrier\":%s,"
 		"\"oper_state\":\"%s\"},\"io\":%s}",
 		CONFIG_BOARD_TARGET, (long long)k_uptime_get(), board_http_port, ipv4_addr,
-		netmask, gateway, CONFIG_NET_CONFIG_PEER_IPV4_ADDR,
-		json_bool(net_if_is_admin_up(iface)), json_bool(net_if_is_up(iface)),
-		json_bool(net_if_is_carrier_ok(iface)), network_oper_state_str(net_if_oper_state(iface)),
-		io_json);
+		netmask, gateway, peer_ipv4, json_bool(admin_up), json_bool(is_up),
+		json_bool(carrier), network_oper_state_str(oper_state), io_json);
 	if (ret != 0) {
 		return ret;
 	}
