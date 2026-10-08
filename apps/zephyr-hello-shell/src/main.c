@@ -14,6 +14,39 @@
 
 extern int board_usb_host_start(void);
 
+#ifdef APP_NATIVE_SIM
+extern void board_io_native_sim_button_set(bool pressed);
+
+static int cmd_sim_button(const struct shell *shell, size_t argc, char **argv)
+{
+	if (argc != 2) {
+		shell_error(shell, "usage: sim button <pressed|released>");
+		return -EINVAL;
+	}
+
+	if (strcmp(argv[1], "pressed") == 0) {
+		board_io_native_sim_button_set(true);
+		shell_print(shell, "B1 (simulated) pressed");
+	} else if (strcmp(argv[1], "released") == 0) {
+		board_io_native_sim_button_set(false);
+		shell_print(shell, "B1 (simulated) released");
+	} else {
+		shell_error(shell, "usage: sim button <pressed|released>");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_sim,
+	SHELL_CMD_ARG(button, NULL, "Set the simulated user button state",
+		      cmd_sim_button, 2, 0),
+	SHELL_SUBCMD_SET_END
+);
+
+SHELL_CMD_REGISTER(sim, &sub_sim, "Simulation controls", NULL);
+#endif
+
 static int cmd_version(const struct shell *shell, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -165,7 +198,15 @@ int main(void)
 
 	ret = board_usb_host_start();
 	if (ret != 0) {
+#ifdef APP_NATIVE_SIM
+		if (ret == -ENOTSUP) {
+			printf("USB host unsupported in simulation\n");
+		} else {
+			printf("USB host startup failed: %d\n", ret);
+		}
+#else
 		printf("USB host startup failed: %d\n", ret);
+#endif
 		/* Non-fatal: continue running LEDs/HTTP even if USB host init failed. */
 	}
 

@@ -2,10 +2,34 @@ cmake_minimum_required(VERSION 3.20.0)
 
 set(extra_conf_file "")
 set(extra_dtc_overlay_file "")
+set(board_compile_definitions "")
 
 if(BOARD STREQUAL "nucleo_h755zi_q/stm32h755xx/m7")
   set(extra_conf_file "${CMAKE_CURRENT_SOURCE_DIR}/boards/nucleo_h755zi_q_stm32h755xx_m7.conf")
   set(extra_dtc_overlay_file "${CMAKE_CURRENT_SOURCE_DIR}/boards/nucleo_h755zi_q_stm32h755xx_m7.overlay")
+  set(board_sources
+    src/boot_optimizations.c
+    src/board_io.c
+    src/usb_host/stm32_hcd_adapter.c
+    src/usb_host/usb_gpio_capture.c
+    src/usb_host/usb_host_shell.c
+    src/usb_host/usb_boot_mouse_class.c
+    third_party/stm32-mw-usb-host/Core/Src/usbh_core.c
+    third_party/stm32-mw-usb-host/Core/Src/usbh_ctlreq.c
+    third_party/stm32-mw-usb-host/Core/Src/usbh_ioreq.c
+    third_party/stm32-mw-usb-host/Core/Src/usbh_pipes.c
+  )
+  set(board_include_dirs
+    third_party/stm32-mw-usb-host/Core/Inc
+  )
+elseif(BOARD STREQUAL "native_sim/native/64")
+  set(board_sources
+    src/board_io_native_sim.c
+    src/usb_host/usb_host_native_sim.c
+  )
+  set(board_compile_definitions APP_NATIVE_SIM)
+else()
+  message(FATAL_ERROR "Unsupported BOARD target: ${BOARD}")
 endif()
 
 if(extra_conf_file)
@@ -27,31 +51,23 @@ endif()
 string(TIMESTAMP APP_BUILD_TIMESTAMP "%Y-%m-%dT%H:%M:%SZ" UTC)
 target_compile_definitions(app PRIVATE
   APP_BUILD_TIMESTAMP=\"${APP_BUILD_TIMESTAMP}\"
+  ${board_compile_definitions}
 )
 
 target_sources(app PRIVATE
-  src/boot_optimizations.c
   src/main.c
-  src/board_io.c
   src/http_server.c
   src/web_assets.c
   src/mjpeg_multipart.c
   src/camera_frames.c
   src/camera_stream.c
-  src/usb_host/stm32_hcd_adapter.c
-  src/usb_host/usb_gpio_capture.c
-  src/usb_host/usb_host_shell.c
   src/usb_host/usb_boot_mouse_report.c
-  src/usb_host/usb_boot_mouse_class.c
-  third_party/stm32-mw-usb-host/Core/Src/usbh_core.c
-  third_party/stm32-mw-usb-host/Core/Src/usbh_ctlreq.c
-  third_party/stm32-mw-usb-host/Core/Src/usbh_ioreq.c
-  third_party/stm32-mw-usb-host/Core/Src/usbh_pipes.c
+  ${board_sources}
 )
 
 target_include_directories(app PRIVATE
   src/usb_host
-  third_party/stm32-mw-usb-host/Core/Inc
+  ${board_include_dirs}
 )
 
 zephyr_linker_sources(SECTIONS sections-rom.ld)
