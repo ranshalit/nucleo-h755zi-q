@@ -29,7 +29,16 @@ elseif(BOARD STREQUAL "native_sim/native/64")
     src/board_temperature_native_sim.c
     src/usb_host/usb_host_native_sim.c
   )
-  set(board_compile_definitions APP_NATIVE_SIM)
+  set(board_compile_definitions APP_SIMULATED_HW)
+elseif(BOARD STREQUAL "mps2/an500")
+  set(extra_conf_file "${CMAKE_CURRENT_SOURCE_DIR}/boards/mps2_an500.conf")
+  set(extra_dtc_overlay_file "${CMAKE_CURRENT_SOURCE_DIR}/boards/mps2_an500.overlay")
+  set(board_sources
+    src/board_io_native_sim.c
+    src/board_temperature_native_sim.c
+    src/usb_host/usb_host_native_sim.c
+  )
+  set(board_compile_definitions APP_SIMULATED_HW)
 else()
   message(FATAL_ERROR "Unsupported BOARD target: ${BOARD}")
 endif()

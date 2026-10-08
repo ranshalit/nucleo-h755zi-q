@@ -14,7 +14,7 @@
 
 extern int board_usb_host_start(void);
 
-#ifdef APP_NATIVE_SIM
+#ifdef APP_SIMULATED_HW
 extern void board_io_native_sim_button_set(bool pressed);
 
 static int cmd_sim_button(const struct shell *shell, size_t argc, char **argv)
@@ -211,7 +211,7 @@ int main(void)
 
 	ret = board_usb_host_start();
 	if (ret != 0) {
-#ifdef APP_NATIVE_SIM
+#ifdef APP_SIMULATED_HW
 		if (ret == -ENOTSUP) {
 			printf("USB host unsupported in simulation\n");
 		} else {

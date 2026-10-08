@@ -14,13 +14,16 @@ Add `mps2/an500` as a separately selected application target in
 button implementation, synthetic temperature implementation, and unsupported
 USB-host implementation. Generalize only the compile-time guard needed to
 expose simulation controls and label USB as unsupported for both simulated
-targets; preserve the existing `native_sim` network-specific behavior.
+targets; use generic board-I/O dashboard branding; preserve the existing
+`native_sim` network-specific behavior.
 
 Add an AN500 configuration fragment and devicetree overlay. The overlay enables
 the MPS2 LAN9220-compatible Ethernet node and maps it to QEMU AN500's LAN9118
 address (`0xa0000000`). Keep the current static IPv4 configuration
 (`192.168.55.2/24`) and the documented host TAP peer (`192.168.55.100/24`).
-QEMU connects the emulated LAN9118 to the existing `zeth` TAP interface.
+QEMU connects the emulated LAN9118 to the existing `zeth` TAP interface. Since
+the emulated target provides no entropy source, enable Zephyr's test random
+generator for this non-production simulation profile.
 
 Build and run AN500 as a separate artifact using the host's existing
 `arm-zephyr-eabi` cross-compile setup and `qemu-system-arm -machine mps2-an500`.
