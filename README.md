@@ -177,6 +177,58 @@ interface. When finished, stop the simulator with Ctrl+C; if you created
   behavior, or physical-board timing. Use the Nucleo build and hardware for
   those checks.
 
+### Run with QEMU MPS2 AN500 (Cortex-M7)
+
+The app also runs as Zephyr firmware on QEMU's MPS2 AN500 Cortex-M7 machine.
+This emulates an MPS2 system, not the STM32H755 or its peripherals. The app
+uses the same logical LED/button, synthetic temperature, and unsupported USB
+backends as native_sim, while Ethernet uses QEMU's emulated LAN9118. The
+dashboard and API are served at `http://192.168.55.2/`, and the MJPEG stream at
+`http://192.168.55.2:8081/`.
+
+Build from the repository root:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export ZEPHYR_TOOLCHAIN_VARIANT=cross-compile
+export CROSS_COMPILE=/home/ranshal/.local/zephyr-sdk-1.0.1/arm-zephyr-eabi/bin/arm-zephyr-eabi-
+
+REPO_ROOT="$PWD"
+APP_DIR="${REPO_ROOT}/apps/zephyr-hello-shell"
+ZEPHYR_DIR="${REPO_ROOT}/vendor/zephyrproject/zephyr"
+cd "$ZEPHYR_DIR"
+west build -p always -b mps2/an500 "$APP_DIR" \
+  -d /tmp/stm32h7-zephyr-hello-shell-qemu-an500
+```
+
+For the full Zephyr TCP/IP path, bring up the already configured `zeth` TAP
+interface as described under [TAP networking](#tap-networking), then run:
+
+```bash
+qemu-system-arm -machine mps2-an500 -nographic \
+  -kernel /tmp/stm32h7-zephyr-hello-shell-qemu-an500/zephyr/zephyr.elf \
+  -nic tap,model=lan9118,ifname=zeth,script=no,downscript=no
+```
+
+No changes to Zephyr's vendored board runner are needed; launch QEMU directly
+because the upstream AN500 board runner selects FVP. At the QEMU shell, use
+`leds on green` and `sim button pressed|released` to exercise the simulated
+controls. The mouse remains disconnected, temperature is synthetic, and
+`CONFIG_TEST_RANDOM_GENERATOR` supplies non-cryptographic test entropy only;
+this profile is not suitable for security-sensitive use.
+
+For a quick run without changing host networking, use QEMU user-mode networking
+with host port forwards instead of TAP:
+
+```bash
+qemu-system-arm -machine mps2-an500 -nographic \
+  -kernel /tmp/stm32h7-zephyr-hello-shell-qemu-an500/zephyr/zephyr.elf \
+  -nic 'user,net=192.168.55.0/24,host=192.168.55.100,hostfwd=tcp:127.0.0.1:8080-192.168.55.2:80,hostfwd=tcp:127.0.0.1:8081-192.168.55.2:8081'
+```
+
+Then open `http://127.0.0.1:8080/`; the camera endpoint is
+`http://127.0.0.1:8081/`.
+
 ### Build
 
 ```bash
