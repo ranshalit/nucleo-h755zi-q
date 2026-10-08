@@ -59,6 +59,74 @@ I/O through both JSON API endpoints and a browser dashboard:
 - user button `B1`
 - board and network status
 
+### Run with Zephyr native_sim
+
+The same application can run on Zephyr's `native_sim/native/64` host target.
+This uses the host toolchain; it simulates application behavior, not the
+STM32H755 or its peripherals. The TAP and localhost profiles use separate
+build directories so their network configurations stay independent.
+
+Build both profiles from the repository root:
+
+```bash
+REPO_ROOT="$PWD"
+APP_DIR="${REPO_ROOT}/apps/zephyr-hello-shell"
+ZEPHYR_DIR="${REPO_ROOT}/vendor/zephyrproject/zephyr"
+cd "$ZEPHYR_DIR"
+
+ZEPHYR_TOOLCHAIN_VARIANT=host west build -p always \
+  -b native_sim/native/64 "$APP_DIR" \
+  -d "${REPO_ROOT}/build/zephyr-hello-shell-native-tap" \
+  -- -DEXTRA_CONF_FILE="${APP_DIR}/conf/native_sim_tap.conf"
+
+ZEPHYR_TOOLCHAIN_VARIANT=host west build -p always \
+  -b native_sim/native/64 "$APP_DIR" \
+  -d "${REPO_ROOT}/build/zephyr-hello-shell-native-localhost" \
+  -- -DEXTRA_CONF_FILE="${APP_DIR}/conf/native_sim_localhost.conf"
+```
+
+Each executable is at
+`build/zephyr-hello-shell-native-{tap,localhost}/zephyr/zephyr.exe`, relative
+to the repository root. Run the profile you want from the repository root:
+
+```bash
+build/zephyr-hello-shell-native-localhost/zephyr/zephyr.exe
+```
+
+The simulator prints the UART pseudoterminal path at startup. In another
+terminal, connect to that path (for example,
+`screen /dev/pts/<n>`) to use the Zephyr shell. Press Ctrl+C in the terminal
+running `zephyr.exe` to stop the simulator.
+
+#### Localhost networking
+
+The localhost profile serves the dashboard and API at
+`http://127.0.0.1:8080/`, with the API available under `/api/v1/`. It uses
+native_sim offloaded sockets and does **not** exercise Zephyr's TCP/IP stack.
+No TAP interface or host network reconfiguration is needed.
+
+#### TAP networking
+
+The TAP profile uses Zephyr's native TAP Ethernet driver and Zephyr's normal
+IPv4/TCP stack. It uses `192.168.55.2/24` for the simulated board and expects
+the host TAP interface at `192.168.55.100/24`. Set up TAP with Zephyr
+`net-tools` and configure the host TAP interface before running the TAP
+executable; the TAP profile will not work until that interface is available.
+The board-side dashboard uses `http://192.168.55.2/`.
+
+#### Simulation differences
+
+- LEDs and button are logical software state, not physical GPIO.
+- Change the simulated button from the shell with `sim button pressed` or
+  `sim button released`.
+- Temperature readings are synthetic and labeled with source `simulated`;
+  they are not MCU die telemetry.
+- USB host hardware is unsupported in native_sim. The simulated mouse state
+  remains disconnected.
+- native_sim does not validate STM32 register-level behavior, USB electrical
+  behavior, or physical-board timing. Use the Nucleo build and hardware for
+  those checks.
+
 ### Build
 
 ```bash
