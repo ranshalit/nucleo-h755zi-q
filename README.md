@@ -171,6 +171,13 @@ interface. When finished, stop the simulator with Ctrl+C; if you created
 `zeth` solely for this run, remove it with
 `sudo ip tuntap del dev zeth mode tap`. Do not remove a pre-existing interface.
 
+> **Switching back to the physical board:** the simulator and the Nucleo board
+> use the same `192.168.55.0/24` subnet. A persistent `zeth` that still holds
+> `192.168.55.100` captures the route even when it is down (`NO-CARRIER`), so
+> pings to the real board time out. Before using hardware, release the address
+> with `sudo ip addr del 192.168.55.100/24 dev zeth` (see
+> [Ethernet validation](#ethernet-validation)).
+
 #### Simulation differences
 
 - LEDs and button are logical software state, not physical GPIO.
@@ -522,6 +529,17 @@ address:
 
 - board: `192.168.55.2/24`
 - host: `192.168.55.100/24`
+
+Assign the host address to the NIC that is cabled to the board (replace
+`<nic>`), and make sure no other interface — especially a leftover native_sim/
+QEMU `zeth` TAP — holds the same address or subnet route:
+
+```bash
+ip -brief addr | grep 192.168.55.        # .100 must be on <nic> only
+sudo ip addr del 192.168.55.100/24 dev zeth   # only if zeth holds it
+sudo ip addr add 192.168.55.100/24 dev <nic>
+ip route get 192.168.55.2                # must show "dev <nic>"
+```
 
 With the cable connected and link up, the serial shell should show the Ethernet
 interface and the static address:
