@@ -6,7 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/shell/shell_string_conv.h>
 
 #include "board_io.h"
 #include "camera_stream.h"
@@ -58,6 +60,63 @@ static int cmd_version(const struct shell *shell, size_t argc, char **argv)
 }
 
 SHELL_CMD_REGISTER(version, NULL, "Show application build information", cmd_version);
+
+static int cmd_cpu_usage(const struct shell *shell, size_t argc, char **argv)
+{
+	k_thread_runtime_stats_t before;
+	k_thread_runtime_stats_t after;
+	unsigned long interval_ms = 1000;
+	uint64_t total;
+	uint64_t busy;
+	unsigned int busy_hundredths;
+	unsigned int idle_hundredths;
+	int err = 0;
+
+	if (argc == 2) {
+		interval_ms = shell_strtoul(argv[1], 10, &err);
+		if (err != 0 || interval_ms == 0 || interval_ms > 60000) {
+			shell_error(shell, "interval must be 1..60000 ms");
+			return -EINVAL;
+		}
+	}
+
+	err = k_thread_runtime_stats_cpu_get(0, &before);
+	if (err != 0) {
+		shell_error(shell, "CPU stats unavailable: %d", err);
+		return err;
+	}
+
+	k_msleep((int32_t)interval_ms);
+
+	err = k_thread_runtime_stats_cpu_get(0, &after);
+	if (err != 0) {
+		shell_error(shell, "CPU stats unavailable: %d", err);
+		return err;
+	}
+
+	total = after.execution_cycles - before.execution_cycles;
+	busy = after.total_cycles - before.total_cycles;
+	if (total == 0 || busy > total) {
+		shell_error(shell, "invalid CPU stats interval");
+		return -EIO;
+	}
+
+	busy_hundredths = (unsigned int)(busy * 10000 / total);
+	idle_hundredths = 10000 - busy_hundredths;
+	shell_print(shell, "CPU busy: %u.%02u%%, idle: %u.%02u%% over %lu ms",
+		    busy_hundredths / 100, busy_hundredths % 100,
+		    idle_hundredths / 100, idle_hundredths % 100,
+		    interval_ms);
+	return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_cpu,
+	SHELL_CMD_ARG(usage, NULL, "CPU busy/idle over [interval_ms] (default 1000)",
+		      cmd_cpu_usage, 1, 1),
+	SHELL_SUBCMD_SET_END
+);
+
+SHELL_CMD_REGISTER(cpu, &sub_cpu, "CPU utilization", NULL);
 
 static int print_led_state(const struct shell *shell, enum board_led_id led_id, const char *separator)
 {

@@ -49,6 +49,13 @@ The repo-owned Zephyr application is:
 It keeps the application and shell configuration in this repository instead of
 patching the upstream Zephyr source tree under `vendor/zephyrproject/zephyr`.
 
+CPU runtime statistics are enabled for this app. On the UART shell, run
+`cpu usage` for CPU busy/idle percentages over 1 second, or
+`cpu usage 5000` for a 5-second interval (1–60000 ms). This measures the
+M7 Zephyr core, not the separate M4 core. `kernel thread list` also shows
+each thread's cumulative execution cycles and CPU percentage since boot;
+its `stack size ... (% ...)` lines instead report peak stack use, not CPU.
+
 At runtime, the application starts two Zephyr threads: one toggles the yellow
 LED (LD2) and the other toggles the red LED (LD3). The green LED (LD1) remains
 available through the serial shell commands. The same application now also runs
