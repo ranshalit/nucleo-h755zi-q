@@ -193,48 +193,34 @@ backends as native_sim, while Ethernet uses QEMU's emulated LAN9118. The
 dashboard and API are served at `http://192.168.55.2/`, and the MJPEG stream at
 `http://192.168.55.2:8081/`.
 
-Build from the repository root:
+From the repository root, build and run with the helper:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-export ZEPHYR_TOOLCHAIN_VARIANT=cross-compile
-export CROSS_COMPILE=/home/ranshal/.local/zephyr-sdk-1.0.1/arm-zephyr-eabi/bin/arm-zephyr-eabi-
-
-REPO_ROOT="$PWD"
-APP_DIR="${REPO_ROOT}/apps/zephyr-hello-shell"
-ZEPHYR_DIR="${REPO_ROOT}/vendor/zephyrproject/zephyr"
-cd "$ZEPHYR_DIR"
-west build -p always -b mps2/an500 "$APP_DIR" \
-  -d /tmp/stm32h7-zephyr-hello-shell-qemu-an500
+scripts/run_zephyr_hello_shell_qemu.sh
 ```
 
-For the full Zephyr TCP/IP path, bring up the already configured `zeth` TAP
-interface as described under [TAP networking](#tap-networking), then run:
+By default it builds into `build/zephyr-hello-shell-qemu-an500` and runs QEMU
+with user-mode networking, forwarding the dashboard/API to
+`http://127.0.0.1:8080/` and the camera stream to
+`http://127.0.0.1:8081/`. Press Ctrl+C to stop. Other useful modes:
 
 ```bash
-qemu-system-arm -machine mps2-an500 -nographic \
-  -kernel /tmp/stm32h7-zephyr-hello-shell-qemu-an500/zephyr/zephyr.elf \
-  -nic tap,model=lan9118,ifname=zeth,script=no,downscript=no
+scripts/run_zephyr_hello_shell_qemu.sh --build-only
+scripts/run_zephyr_hello_shell_qemu.sh --run-only
+scripts/run_zephyr_hello_shell_qemu.sh --network tap
+scripts/run_zephyr_hello_shell_qemu.sh --debug
 ```
 
-No changes to Zephyr's vendored board runner are needed; launch QEMU directly
-because the upstream AN500 board runner selects FVP. At the QEMU shell, use
-`leds on green` and `sim button pressed|released` to exercise the simulated
-controls. The mouse remains disconnected, temperature is synthetic, and
+The `tap` mode uses Zephyr's regular TCP/IP path; it expects the host interface
+`zeth` configured at `192.168.55.100/24` and up before starting. See the TAP
+networking instructions above. At the QEMU shell, use `leds on green` and
+`sim button pressed|released` to exercise the simulated controls. The mouse
+remains disconnected, temperature is synthetic, and
 `CONFIG_TEST_RANDOM_GENERATOR` supplies non-cryptographic test entropy only;
 this profile is not suitable for security-sensitive use.
 
-For a quick run without changing host networking, use QEMU user-mode networking
-with host port forwards instead of TAP:
-
-```bash
-qemu-system-arm -machine mps2-an500 -nographic \
-  -kernel /tmp/stm32h7-zephyr-hello-shell-qemu-an500/zephyr/zephyr.elf \
-  -nic 'user,net=192.168.55.0/24,host=192.168.55.100,hostfwd=tcp:127.0.0.1:8080-192.168.55.2:80,hostfwd=tcp:127.0.0.1:8081-192.168.55.2:8081'
-```
-
-Then open `http://127.0.0.1:8080/`; the camera endpoint is
-`http://127.0.0.1:8081/`.
+No changes to Zephyr's vendored board runner are needed; the helper launches
+QEMU directly because the upstream AN500 board runner selects FVP.
 
 ### Build
 
@@ -341,6 +327,35 @@ Yellow and red should continue blinking independently after boot, and
 their shell-reported states over time on the connected board.
 
 ### Debugging
+
+#### QEMU debugging (GDB)
+
+Build with symbols, then start QEMU halted at reset with the local GDB server:
+
+```bash
+scripts/run_zephyr_hello_shell_qemu.sh --debug
+```
+
+In a second terminal, start the Zephyr SDK GDB with the ELF from the same
+build, then connect and set a breakpoint:
+
+```bash
+~/.local/zephyr-sdk-1.0.1/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb \
+  build/zephyr-hello-shell-qemu-an500/zephyr/zephyr.elf
+```
+
+At the GDB prompt:
+
+```gdb
+target remote localhost:3333
+break main
+continue
+```
+
+QEMU starts halted before application execution, so the breakpoint can catch
+`main` on its first run. Use `next`, `step`, `bt`, and `continue` to debug;
+Ctrl+C interrupts execution. Stop QEMU with Ctrl+C in its terminal. This is
+debugging of the emulated MPS2 AN500 Cortex-M7, not the STM32H755.
 
 #### Shell debugging (ST-LINK / OpenOCD / GDB)
 
