@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,13 +18,20 @@ static int test_audio_port;
 #define SESSION 7U
 
 static int listen_fd = -1;
-static unsigned int poisoned_polls;
+/* Written by the server thread, read by the test thread. */
+static atomic_uint poisoned_polls;
 
-int test_zsock_listen(int fd, int backlog)
+/* SO_REUSEADDR must precede bind() to survive TIME_WAIT from earlier runs. */
+int test_zsock_bind(int fd, const struct sockaddr *addr, socklen_t len)
 {
 	int one = 1;
 
 	(void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	return bind(fd, addr, len);
+}
+
+int test_zsock_listen(int fd, int backlog)
+{
 	listen_fd = fd;
 	return listen(fd, backlog);
 }
@@ -39,7 +47,7 @@ int test_zsock_poll(struct pollfd *fds, int nfds, int timeout)
 
 	if (nfds == 1 && fds[0].fd == listen_fd) {
 		fds[1].revents = POLLERR | POLLHUP | POLLNVAL;
-		poisoned_polls++;
+		atomic_fetch_add(&poisoned_polls, 1U);
 	}
 	return ret;
 }
@@ -155,10 +163,10 @@ static void expect_stream_header(int fd)
 static void test_new_client_is_served(void)
 {
 	int fd = connect_client();
-	unsigned int before = poisoned_polls;
+	unsigned int before = atomic_load(&poisoned_polls);
 
 	expect_stream_header(fd);
-	assert(poisoned_polls > before);
+	assert(atomic_load(&poisoned_polls) > before);
 	close(fd);
 	printf("PASS: newly accepted client streams despite unpolled client slot\n");
 }
@@ -166,10 +174,14 @@ static void test_new_client_is_served(void)
 static void test_busy_is_prompt_409(void)
 {
 	char buf[4096];
-	int active = connect_client();
+	int active;
 	int second;
 	int64_t start;
 	size_t got;
+
+	/* Allow the loop to notice the previous client's FIN. */
+	k_msleep(50);
+	active = connect_client();
 
 	expect_stream_header(active);
 	start = k_uptime_get();
