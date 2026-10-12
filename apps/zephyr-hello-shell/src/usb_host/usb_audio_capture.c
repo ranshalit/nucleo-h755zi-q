@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
  * STM32 USBH class that streams a UAC1 microphone (isochronous IN) into
- * a bounded PCM ring. Producer: the USB poll thread (BgndProcess).
- * Consumer: usb_audio_read() from any other thread.
+ * a bounded PCM ring. Producer: the HCD interrupt completes and resubmits
+ * each iso IN (usb_audio_capture_urb_done()); the USB poll thread
+ * (BgndProcess) starts the stream and handles errors, missed frames and
+ * halts. Consumer: usb_audio_read() from any other thread.
  */
 #include "usb_audio_capture.h"
 #include "usb_audio_desc.h"
@@ -195,7 +197,13 @@ static USBH_StatusTypeDef audio_init(USBH_HandleTypeDef *host)
 
 static USBH_StatusTypeDef audio_deinit(USBH_HandleTypeDef *host)
 {
-	if (audio.allocated) {
+	unsigned int irq_key = irq_lock();
+	bool allocated = audio.allocated;
+
+	/* Stop the interrupt-side resubmission before closing the pipe. */
+	audio.allocated = false;
+	irq_unlock(irq_key);
+	if (allocated) {
 		(void)USBH_ClosePipe(host, audio.pipe);
 		(void)USBH_FreePipe(host, audio.pipe);
 	}
@@ -297,9 +305,16 @@ static void audio_fail(USBH_HandleTypeDef *host, const char *reason)
 	(void)USBH_ClosePipe(host, audio.pipe);
 }
 
+static bool audio_too_many_errors(void)
+{
+	return audio.consecutive_errors > AUDIO_MAX_CONSECUTIVE_ERRORS;
+}
+
 static void audio_consecutive_error(USBH_HandleTypeDef *host)
 {
-	if (++audio.consecutive_errors > AUDIO_MAX_CONSECUTIVE_ERRORS) {
+	++audio.consecutive_errors;
+	/* From the HCD interrupt, audio_service() reports it (printf, HAL lock). */
+	if (audio_too_many_errors() && !k_is_in_isr()) {
 		audio_fail(host, "isochronous IN errors");
 	}
 }
@@ -346,10 +361,46 @@ static void audio_complete(USBH_HandleTypeDef *host)
 	}
 }
 
-static USBH_StatusTypeDef audio_process(USBH_HandleTypeDef *host)
+static bool audio_submit(USBH_HandleTypeDef *host)
+{
+	if (USBH_LL_SubmitURB(host, audio.pipe, 1U, USBH_EP_ISO, USBH_PID_DATA,
+			      audio.packet, audio.format.packet_bytes, 0U) != USBH_OK) {
+		return false;
+	}
+	audio.submit_timer = host->Timer;
+	audio.pending = true;
+	return true;
+}
+
+/*
+ * HCD interrupt: an iso IN must be resubmitted within the 1 ms frame that
+ * completed it. Doing it here instead of in the lowest-priority, busy-polling
+ * USB thread keeps capture lossless while network threads (camera and
+ * microphone streams) hold the CPU for more than a frame. Anything other
+ * than a clean completion is left to audio_process().
+ */
+void usb_audio_capture_urb_done(USBH_HandleTypeDef *host, uint8_t pipe)
+{
+	if (!audio.allocated || audio.failed || audio.halting || !audio.pending ||
+	    pipe != audio.pipe) {
+		return;
+	}
+	audio.pending = false;
+	audio_complete(host);
+	if (!audio_too_many_errors()) {
+		/* Otherwise the poll thread stops capture and reports the error. */
+		(void)audio_submit(host);
+	}
+}
+
+static void audio_service(USBH_HandleTypeDef *host)
 {
 	if (audio.failed || !audio.allocated) {
-		return USBH_OK;
+		return;
+	}
+	if (audio_too_many_errors()) {
+		audio_fail(host, "isochronous IN errors");
+		return;
 	}
 	if (audio.pending) {
 		uint32_t age = host->Timer - audio.submit_timer;
@@ -359,7 +410,7 @@ static USBH_StatusTypeDef audio_process(USBH_HandleTypeDef *host)
 				if (age > AUDIO_URB_HALT_FRAMES * 4U) {
 					audio_fail(host, "iso channel did not halt");
 				}
-				return USBH_OK;
+				return;
 			}
 			audio.halting = false;
 			audio.pending = false;
@@ -395,17 +446,22 @@ static USBH_StatusTypeDef audio_process(USBH_HandleTypeDef *host)
 			}
 		}
 		if (audio.failed || audio.pending) {
-			return USBH_OK;
+			return;
 		}
 	}
 
-	if (USBH_LL_SubmitURB(host, audio.pipe, 1U, USBH_EP_ISO, USBH_PID_DATA,
-			      audio.packet, audio.format.packet_bytes, 0U) != USBH_OK) {
+	if (!audio_submit(host)) {
 		audio_fail(host, "iso submit failed");
-		return USBH_OK;
 	}
-	audio.submit_timer = host->Timer;
-	audio.pending = true;
+}
+
+static USBH_StatusTypeDef audio_process(USBH_HandleTypeDef *host)
+{
+	/* Serialize with usb_audio_capture_urb_done() in the HCD interrupt. */
+	unsigned int key = irq_lock();
+
+	audio_service(host);
+	irq_unlock(key);
 	return USBH_OK;
 }
 

@@ -20,6 +20,11 @@ void usb_audio_snapshot_get(struct usb_audio_snapshot *out);
  */
 size_t usb_audio_read(uint32_t session, uint8_t *out, size_t capacity);
 
+struct _USBH_HandleTypeDef;
+
+/* HCD interrupt hook (board builds): a channel's URB completed. */
+void usb_audio_capture_urb_done(struct _USBH_HandleTypeDef *host, uint8_t pipe);
+
 #ifdef __cplusplus
 }
 #endif
