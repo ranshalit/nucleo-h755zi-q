@@ -22,3 +22,21 @@ Apply with:
 cd vendor/zephyrproject/zephyr
 git apply /home/ranshal/project/stm32h7/patches/udc_stm32-sof-enable.patch
 ```
+
+## stm32h7-hcd-rx-before-hcint.patch
+
+Applies to `vendor/zephyrproject/modules/hal/stm32/stm32cube/stm32h7xx/drivers/src/stm32h7xx_hal_hcd.c`.
+
+`HAL_HCD_IRQHandler()` previously dispatched host-channel completion callbacks
+before draining the RX status FIFO. When HCINT/XFRC and RXFLVL were pending
+together, a URB_DONE callback could observe the previous transfer length and
+buffer contents. The patch drains pending RX FIFO entries before dispatching
+channel callbacks, so the audio ISR can consume the completed packet and
+resubmit the next isochronous IN URB in the same frame.
+
+Apply with:
+
+```
+cd vendor/zephyrproject/modules/hal/stm32
+git apply --unidiff-zero /home/ranshal/project/stm32h7/patches/stm32h7-hcd-rx-before-hcint.patch
+```

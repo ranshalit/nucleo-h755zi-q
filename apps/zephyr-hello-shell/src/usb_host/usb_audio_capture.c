@@ -49,6 +49,7 @@ struct audio_state {
 	bool rate_control;
 	enum audio_request request;
 	uint32_t submit_timer;
+	uint32_t generation;
 	uint32_t consecutive_errors;
 	uint8_t rate[4] __aligned(4);
 	uint8_t packet[AUDIO_MAX_PACKET + 1U] __aligned(4);
@@ -300,7 +301,6 @@ static USBH_StatusTypeDef audio_requests(USBH_HandleTypeDef *host)
 static void audio_fail(USBH_HandleTypeDef *host, const char *reason)
 {
 	printf("ST USBH: audio capture stopped: %s\n", reason);
-	audio.failed = true;
 	audio_set_ready(false, reason);
 	(void)USBH_ClosePipe(host, audio.pipe);
 }
@@ -310,22 +310,18 @@ static bool audio_too_many_errors(void)
 	return audio.consecutive_errors > AUDIO_MAX_CONSECUTIVE_ERRORS;
 }
 
-static void audio_consecutive_error(USBH_HandleTypeDef *host)
+static void audio_consecutive_error(void)
 {
 	++audio.consecutive_errors;
-	/* From the HCD interrupt, audio_service() reports it (printf, HAL lock). */
-	if (audio_too_many_errors() && !k_is_in_isr()) {
-		audio_fail(host, "isochronous IN errors");
-	}
 }
 
-static void audio_count_error(USBH_HandleTypeDef *host)
+static void audio_count_error(void)
 {
 	k_spinlock_key_t key = k_spin_lock(&audio_lock);
 
 	usb_audio_ring_note_error(&audio_ring);
 	k_spin_unlock(&audio_lock, key);
-	audio_consecutive_error(host);
+	audio_consecutive_error();
 }
 
 static void audio_count_missed(void)
@@ -341,7 +337,7 @@ static void audio_complete(USBH_HandleTypeDef *host)
 	uint32_t length = USBH_LL_GetLastXferSize(host, audio.pipe);
 
 	if (length > audio.format.packet_bytes) {
-		audio_count_error(host);
+		audio_count_error();
 		return;
 	}
 
@@ -355,7 +351,7 @@ static void audio_complete(USBH_HandleTypeDef *host)
 	k_spin_unlock(&audio_lock, key);
 	if (after.errors != before.errors) {
 		/* The ring already counted the rejected packet. */
-		audio_consecutive_error(host);
+		audio_consecutive_error();
 	} else {
 		audio.consecutive_errors = 0U;
 	}
@@ -363,13 +359,38 @@ static void audio_complete(USBH_HandleTypeDef *host)
 
 static bool audio_submit(USBH_HandleTypeDef *host)
 {
-	if (USBH_LL_SubmitURB(host, audio.pipe, 1U, USBH_EP_ISO, USBH_PID_DATA,
-			      audio.packet, audio.format.packet_bytes, 0U) != USBH_OK) {
-		return false;
-	}
+	return USBH_LL_SubmitURB(host, audio.pipe, 1U, USBH_EP_ISO,
+				 USBH_PID_DATA, audio.packet,
+				 audio.format.packet_bytes, 0U) == USBH_OK;
+}
+
+static uint32_t audio_reserve_submit_locked(USBH_HandleTypeDef *host)
+{
 	audio.submit_timer = host->Timer;
 	audio.pending = true;
-	return true;
+	return ++audio.generation;
+}
+
+static const char *audio_submit_reserved(USBH_HandleTypeDef *host,
+					 uint32_t generation)
+{
+	unsigned int key = irq_lock();
+	bool failed;
+	bool submitted;
+
+	if (audio.generation != generation || !audio.pending) {
+		irq_unlock(key);
+		return NULL;
+	}
+	submitted = audio_submit(host);
+	failed = !submitted && audio.generation == generation && audio.pending;
+	if (failed) {
+		audio.pending = false;
+		audio.failed = true;
+		++audio.generation;
+	}
+	irq_unlock(key);
+	return failed ? "iso submit failed" : NULL;
 }
 
 /*
@@ -386,82 +407,165 @@ void usb_audio_capture_urb_done(USBH_HandleTypeDef *host, uint8_t pipe)
 		return;
 	}
 	audio.pending = false;
+	++audio.generation;
 	audio_complete(host);
 	if (!audio_too_many_errors()) {
-		/* Otherwise the poll thread stops capture and reports the error. */
-		(void)audio_submit(host);
+		/* Reserve state before starting hardware; IRQ is already in progress. */
+		audio.submit_timer = host->Timer;
+		audio.pending = true;
+		++audio.generation;
+		if (!audio_submit(host)) {
+			audio.pending = false;
+			++audio.generation;
+		}
 	}
 }
 
-static void audio_service(USBH_HandleTypeDef *host)
+static const char *audio_service(USBH_HandleTypeDef *host, bool *close_pipe)
 {
+	bool pending;
+	bool halting;
+	bool active = false;
+	bool complete = false;
+	uint8_t pipe;
+	uint32_t generation;
+	uint32_t age;
+	USBH_URBStateTypeDef urb_state = USBH_URB_IDLE;
+	unsigned int key = irq_lock();
+
 	if (audio.failed || !audio.allocated) {
-		return;
+		irq_unlock(key);
+		return NULL;
 	}
 	if (audio_too_many_errors()) {
-		audio_fail(host, "isochronous IN errors");
-		return;
+		audio.failed = true;
+		irq_unlock(key);
+		return "isochronous IN errors";
 	}
-	if (audio.pending) {
-		uint32_t age = host->Timer - audio.submit_timer;
 
-		if (audio.halting) {
-			if (stm32_hcd_adapter_channel_active(audio.pipe)) {
-				if (age > AUDIO_URB_HALT_FRAMES * 4U) {
-					audio_fail(host, "iso channel did not halt");
-				}
-				return;
+	pending = audio.pending;
+	if (!pending) {
+		generation = audio_reserve_submit_locked(host);
+		irq_unlock(key);
+		return audio_submit_reserved(host, generation);
+	}
+
+	pipe = audio.pipe;
+	halting = audio.halting;
+	generation = audio.generation;
+	age = host->Timer - audio.submit_timer;
+	irq_unlock(key);
+
+	/*
+	 * These HAL/register reads are outside irq_lock(). A completion may
+	 * race them; generation below rejects a stale observation.
+	 */
+	active = stm32_hcd_adapter_channel_active(pipe);
+	if (!halting) {
+		urb_state = USBH_LL_GetURBState(host, pipe);
+	}
+
+	key = irq_lock();
+	if (!audio.allocated || audio.failed || !audio.pending ||
+	    audio.pipe != pipe || audio.generation != generation) {
+		irq_unlock(key);
+		return NULL;
+	}
+
+	if (halting) {
+		if (active) {
+			if (age > AUDIO_URB_HALT_FRAMES * 4U) {
+				audio.failed = true;
+				irq_unlock(key);
+				return "iso channel did not halt";
 			}
-			audio.halting = false;
+			irq_unlock(key);
+			return NULL;
+		}
+		audio.halting = false;
+		audio.pending = false;
+		++audio.generation;
+	} else {
+		switch (urb_state) {
+		case USBH_URB_DONE:
 			audio.pending = false;
-		} else {
-			switch (USBH_LL_GetURBState(host, audio.pipe)) {
-			case USBH_URB_DONE:
+			++audio.generation;
+			complete = true;
+			break;
+		case USBH_URB_NOTREADY:
+		case USBH_URB_ERROR:
+		case USBH_URB_STALL:
+			audio.pending = false;
+			++audio.generation;
+			audio_count_error();
+			break;
+		default:
+			/*
+			 * HAL halts on frame overrun without changing
+			 * the URB state: a disabled channel that never
+			 * completed is a missed frame.
+			 */
+			if (age >= AUDIO_URB_MISSED_FRAMES && !active &&
+			    urb_state == USBH_URB_IDLE) {
 				audio.pending = false;
-				audio_complete(host);
-				break;
-			case USBH_URB_NOTREADY:
-			case USBH_URB_ERROR:
-			case USBH_URB_STALL:
-				audio.pending = false;
-				audio_count_error(host);
-				break;
-			default:
-				/*
-				 * HAL halts on frame overrun without changing
-				 * the URB state: a disabled channel that never
-				 * completed is a missed frame.
-				 */
-				if (age >= AUDIO_URB_MISSED_FRAMES &&
-				    !stm32_hcd_adapter_channel_active(audio.pipe) &&
-				    USBH_LL_GetURBState(host, audio.pipe) == USBH_URB_IDLE) {
-					audio.pending = false;
-					audio_count_missed();
-				} else if (age >= AUDIO_URB_HALT_FRAMES) {
-					audio_count_missed();
-					(void)USBH_ClosePipe(host, audio.pipe);
-					audio.halting = true;
-				}
-				break;
+				++audio.generation;
+				audio_count_missed();
+			} else if (age >= AUDIO_URB_HALT_FRAMES) {
+				audio_count_missed();
+				audio.halting = true;
+				*close_pipe = true;
 			}
-		}
-		if (audio.failed || audio.pending) {
-			return;
+			break;
 		}
 	}
 
-	if (!audio_submit(host)) {
-		audio_fail(host, "iso submit failed");
+	if (audio_too_many_errors()) {
+		audio.failed = true;
+		irq_unlock(key);
+		if (complete) {
+			audio_complete(host);
+		}
+		return "isochronous IN errors";
 	}
+	pending = audio.pending;
+	if (!pending && !complete) {
+		generation = audio_reserve_submit_locked(host);
+	}
+	irq_unlock(key);
+
+	if (complete) {
+		audio_complete(host);
+		key = irq_lock();
+		if (!audio.allocated || audio.failed || audio.pending) {
+			irq_unlock(key);
+			return NULL;
+		}
+		if (audio_too_many_errors()) {
+			audio.failed = true;
+			irq_unlock(key);
+			return "isochronous IN errors";
+		}
+		generation = audio_reserve_submit_locked(host);
+		irq_unlock(key);
+		return audio_submit_reserved(host, generation);
+	}
+	if (*close_pipe) {
+		return NULL;
+	}
+	return pending ? NULL : audio_submit_reserved(host, generation);
 }
 
 static USBH_StatusTypeDef audio_process(USBH_HandleTypeDef *host)
 {
-	/* Serialize with usb_audio_capture_urb_done() in the HCD interrupt. */
-	unsigned int key = irq_lock();
+	bool close_pipe = false;
+	const char *failure = audio_service(host, &close_pipe);
 
-	audio_service(host);
-	irq_unlock(key);
+	/* Do teardown and logging only after audio_service() releases its lock. */
+	if (failure != NULL) {
+		audio_fail(host, failure);
+	} else if (close_pipe) {
+		(void)USBH_ClosePipe(host, audio.pipe);
+	}
 	return USBH_OK;
 }
 
