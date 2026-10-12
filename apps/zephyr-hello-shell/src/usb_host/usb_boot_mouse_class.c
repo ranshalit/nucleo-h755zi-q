@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "usb_boot_mouse.h"
+#include "usb_class_select.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -59,8 +60,7 @@ bool usb_boot_mouse_last_report(struct usb_boot_mouse_report *report,
 
 static USBH_StatusTypeDef mouse_init(USBH_HandleTypeDef *host)
 {
-	const USBH_InterfaceDescTypeDef *interface = &host->device.CfgDesc.Itf_Desc[0];
-	const USBH_EpDescTypeDef *endpoint = NULL;
+	struct usb_function_selection sel;
 
 	memset(&mouse, 0, sizeof(mouse));
 	k_spinlock_key_t key = k_spin_lock(&snapshot_lock);
@@ -70,40 +70,28 @@ static USBH_StatusTypeDef mouse_init(USBH_HandleTypeDef *host)
 	memset(&mouse_snapshot, 0, sizeof(mouse_snapshot));
 	mouse_snapshot.session = session;
 	k_spin_unlock(&snapshot_lock, key);
-	if (interface->bInterfaceClass != HID_CLASS ||
-	    interface->bInterfaceSubClass != HID_BOOT_SUBCLASS ||
-	    interface->bInterfaceProtocol != HID_MOUSE_PROTOCOL ||
-	    interface->bAlternateSetting != 0U) {
+	/* Scan every interface: the boot mouse need not be interface 0. */
+	if (usb_function_select(host->device.CfgDesc_Raw,
+				sizeof(host->device.CfgDesc_Raw), &sel) != 0 ||
+	    sel.kind != USB_FUNCTION_BOOT_MOUSE) {
 		printf("ST USBH: unsupported HID interface (boot mouse required)\n");
 		return USBH_FAIL;
 	}
-	for (uint8_t i = 0; i < interface->bNumEndpoints &&
-			    i < USBH_MAX_NUM_ENDPOINTS; i++) {
-		const USBH_EpDescTypeDef *candidate = &interface->Ep_Desc[i];
-
-		if ((candidate->bEndpointAddress & 0x80U) != 0U &&
-		    (candidate->bmAttributes & 0x03U) == USB_EP_TYPE_INTR) {
-			endpoint = candidate;
-			break;
-		}
-	}
-	if (endpoint == NULL || endpoint->wMaxPacketSize < 3U ||
-	    endpoint->wMaxPacketSize > MOUSE_REPORT_MAX_SIZE ||
-	    endpoint->bInterval == 0U) {
+	if (sel.packet_size > MOUSE_REPORT_MAX_SIZE) {
 		printf("ST USBH: boot mouse interrupt-IN endpoint missing or invalid\n");
 		return USBH_FAIL;
 	}
 
-	mouse.pipe = USBH_AllocPipe(host, endpoint->bEndpointAddress);
+	mouse.pipe = USBH_AllocPipe(host, sel.endpoint);
 	if (mouse.pipe == 0xffU) {
 		printf("ST USBH: no free pipe for boot mouse\n");
 		return USBH_FAIL;
 	}
 	mouse.allocated = true;
-	mouse.endpoint = endpoint->bEndpointAddress;
-	mouse.interface = interface->bInterfaceNumber;
-	mouse.interval = endpoint->bInterval;
-	mouse.packet_size = (uint8_t)endpoint->wMaxPacketSize;
+	mouse.endpoint = sel.endpoint;
+	mouse.interface = sel.interface_number;
+	mouse.interval = sel.interval;
+	mouse.packet_size = (uint8_t)sel.packet_size;
 	if (USBH_LL_OpenPipe(host, mouse.pipe, mouse.endpoint, host->device.address,
 			     host->device.speed, USBH_EP_INTERRUPT,
 			     mouse.packet_size) != USBH_OK) {

@@ -15,6 +15,10 @@ if(BOARD STREQUAL "nucleo_h755zi_q/stm32h755xx/m7")
     src/usb_host/usb_gpio_capture.c
     src/usb_host/usb_host_shell.c
     src/usb_host/usb_boot_mouse_class.c
+    src/usb_host/usb_audio_capture.c
+    src/usb_host/usb_audio_buffer.c
+    src/usb_host/usb_audio_desc.c
+    src/usb_host/usb_class_select.c
     third_party/stm32-mw-usb-host/Core/Src/usbh_core.c
     third_party/stm32-mw-usb-host/Core/Src/usbh_ctlreq.c
     third_party/stm32-mw-usb-host/Core/Src/usbh_ioreq.c

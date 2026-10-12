@@ -503,6 +503,13 @@ void stm32_hcd_adapter_debug_channels(void)
 	printf("\n");
 }
 
+bool stm32_hcd_adapter_channel_active(uint8_t pipe)
+{
+	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
+
+	return (USBx_HC(pipe)->HCCHAR & USB_OTG_HCCHAR_CHENA) != 0U;
+}
+
 USBH_URBStateTypeDef USBH_LL_GetURBState(USBH_HandleTypeDef *phost,
 					 uint8_t pipe)
 {
