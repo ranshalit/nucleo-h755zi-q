@@ -56,6 +56,49 @@ M7 Zephyr core, not the separate M4 core. `kernel thread list` also shows
 each thread's cumulative execution cycles and CPU percentage since boot;
 its `stack size ... (% ...)` lines instead report peak stack use, not CPU.
 
+The M7 board build also records Zephyr scheduler/interrupt events as CTF in a
+16 KiB RAM buffer. This is a finite snapshot: recording stops when the buffer
+fills, and a reset clears it. To view it with the open-source Eclipse Trace
+Compass, flash the board, let it run briefly, then attach with
+`scripts/debug_zephyr_hello_shell.sh` and connect GDB using the ELF from that
+same build (see [Shell debugging](#shell-debugging-st-link--openocd--gdb)).
+With M7 halted, in GDB run:
+
+```gdb
+dump binary memory channel0_0 ram_tracing (ram_tracing + 'tracing_backend_ram.c'::pos)
+```
+
+Put `channel0_0` beside a copy of
+`vendor/zephyrproject/zephyr/subsys/tracing/ctf/tsdl/metadata` in a directory,
+then import that directory as a CTF trace in Trace Compass (or inspect it
+with `babeltrace2 <directory>`). Dump only through the backend's `pos` cursor:
+the unused tail of the RAM array is not a valid CTF event. Only M7 Zephyr
+events are recorded, not M4 activity. The ST-LINK virtual COM port remains
+available for the shell.
+
+Importing adds the trace to Project Explorer but does not open it: right-click
+the imported `trace` under **Traces** and select **Open** to display its events,
+histogram, and statistics. For a per-task CPU timeline, import
+`scripts/zephyr-ctf-scheduling.xml` through **Window > Preferences > Tracing >
+XML Analyses > Import**, enable it, then reopen the trace. Expand **Views**
+under the trace and open **Zephyr task CPU timeline**. Green means running,
+gray means switched out; the chart only covers captured switch events, not
+task readiness or scheduling after the RAM buffer fills. If the initial view
+is empty, click a busy region around 13 seconds on the **Histogram** tab to
+move the synchronized 100 ms timeline window to recorded task switches. Rows
+are keyed by thread name, so threads with identical names share a row; ISR
+execution is not subtracted from a task's green interval.
+
+For example, if GDB saved `channel0_0` in the repository root:
+
+```bash
+mkdir -p build/zephyr-hello-shell/trace
+mv channel0_0 build/zephyr-hello-shell/trace/
+cp vendor/zephyrproject/zephyr/subsys/tracing/ctf/tsdl/metadata \
+  build/zephyr-hello-shell/trace/
+babeltrace2 build/zephyr-hello-shell/trace
+```
+
 At runtime, the application starts two Zephyr threads: one toggles the yellow
 LED (LD2) and the other toggles the red LED (LD3). The green LED (LD1) remains
 available through the serial shell commands. The same application now also runs

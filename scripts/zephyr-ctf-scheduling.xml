@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tmfxml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="xmlDefinition.xsd">
+    <stateProvider version="0" id="zephyr.ctf.scheduling">
+        <head>
+            <traceType id="org.eclipse.linuxtools.tmf.ui.type.ctf" />
+            <label value="Zephyr task scheduling" />
+        </head>
+        <eventHandler eventName="thread_switched_in">
+            <stateChange>
+                <stateAttribute type="constant" value="Tasks" />
+                <stateAttribute type="eventField" value="name" />
+                <stateValue type="int" value="1" />
+            </stateChange>
+        </eventHandler>
+        <eventHandler eventName="thread_switched_out">
+            <stateChange>
+                <stateAttribute type="constant" value="Tasks" />
+                <stateAttribute type="eventField" value="name" />
+                <stateValue type="int" value="0" />
+            </stateChange>
+        </eventHandler>
+    </stateProvider>
+    <timeGraphView id="zephyr.ctf.scheduling.view">
+        <head>
+            <analysis id="zephyr.ctf.scheduling" />
+            <label value="Zephyr task CPU timeline" />
+        </head>
+        <definedValue name="Not running" value="0" color="#D3D3D3" />
+        <definedValue name="Running" value="1" color="#258B46" />
+        <entry path="Tasks/*">
+            <display type="self" />
+        </entry>
+    </timeGraphView>
+</tmfxml>
