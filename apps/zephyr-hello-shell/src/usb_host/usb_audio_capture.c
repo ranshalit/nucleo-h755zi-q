@@ -96,6 +96,21 @@ static void audio_set_ready(bool ready, const char *reason)
 	k_spin_unlock(&audio_lock, key);
 }
 
+static USBH_StatusTypeDef audio_init_failed(USBH_HandleTypeDef *host,
+					     const char *reason)
+{
+	if (audio.allocated) {
+		(void)USBH_FreePipe(host, audio.pipe);
+		audio.allocated = false;
+	}
+
+	k_spinlock_key_t key = k_spin_lock(&audio_lock);
+
+	usb_audio_ring_detach(&audio_ring, reason);
+	k_spin_unlock(&audio_lock, key);
+	return USBH_FAIL;
+}
+
 /*
  * True when the selected streaming alternate advertises the UAC1
  * sampling-frequency control on its data endpoint (CS_ENDPOINT
@@ -161,15 +176,13 @@ static USBH_StatusTypeDef audio_init(USBH_HandleTypeDef *host)
 
 	audio.pipe = USBH_AllocPipe(host, audio.format.endpoint);
 	if (audio.pipe == 0xffU) {
-		audio_set_ready(false, "no free host channel");
-		return USBH_FAIL;
+		return audio_init_failed(host, "no free host channel");
 	}
 	audio.allocated = true;
 	if (USBH_LL_OpenPipe(host, audio.pipe, audio.format.endpoint,
 			     host->device.address, host->device.speed, USBH_EP_ISO,
 			     audio.format.packet_bytes) != USBH_OK) {
-		audio_set_ready(false, "iso pipe open failed");
-		return USBH_FAIL;
+		return audio_init_failed(host, "iso pipe open failed");
 	}
 	printf("ST USBH: audio IN IF%u alt%u EP 0x%02x %u Hz %u ch %u-bit "
 	       "packet %u B rate_control=%u session %u\n",
