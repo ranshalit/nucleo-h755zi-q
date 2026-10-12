@@ -70,6 +70,15 @@ static size_t mic_as_general_offset(void)
 	return find(work, fixture_len, pat, sizeof(pat));
 }
 
+static size_t ac_header_offset(void)
+{
+	static const uint8_t pat[] = {
+		0x0a, 0x24, 0x01, 0x00, 0x01, 0x72, 0x00, 0x02, 0x01, 0x02
+	};
+
+	return find(work, fixture_len, pat, sizeof(pat));
+}
+
 static void expect_fail(size_t len, int expected)
 {
 	struct usb_audio_format out;
@@ -204,6 +213,7 @@ static void test_non_pcm_format(void)
 	g = mic_as_general_offset();
 	assert(work[g + 7] == 0x1a && work[g + 9] == 0x02);
 	work[g + 10] = 0x02;
+	work[g + 15] = 5; /* Valid Type II layout with five discrete rates. */
 	expect_fail(fixture_len, -ENOTSUP);
 	printf("PASS: test_non_pcm_format\n");
 }
@@ -220,7 +230,7 @@ static void test_packet_capacity_too_small(void)
 	work[ep + 5] = 0;
 	expect_fail(fixture_len, -ENOTSUP);
 
-	/* 191 bytes < 192 for 48 kHz; 44.1 kHz needs 177 and fits. */
+	/* 191 bytes < 192 for 48 kHz; 44.1 kHz needs 180 and fits. */
 	reset_work();
 	ep = mic_ep_offset();
 	work[ep + 4] = 191;
@@ -228,7 +238,72 @@ static void test_packet_capacity_too_small(void)
 	assert(usb_audio_select_input(work, fixture_len, &out) == 0);
 	assert(out.sample_rate_hz == 44100);
 	assert(out.packet_bytes == 191);
+
+	/* 44.1 kHz needs ceil(44100 / 1000) * 4 = 180 bytes. */
+	for (uint8_t capacity = 177; capacity < 180; capacity++) {
+		reset_work();
+		ep = mic_ep_offset();
+		work[ep + 4] = capacity;
+		work[ep + 5] = 0;
+		assert(usb_audio_select_input(work, fixture_len, &out) == 0);
+		assert(out.sample_rate_hz != 44100);
+		assert(out.sample_rate_hz <= 32000);
+	}
+	reset_work();
+	ep = mic_ep_offset();
+	work[ep + 4] = 180;
+	work[ep + 5] = 0;
+	assert(usb_audio_select_input(work, fixture_len, &out) == 0);
+	assert(out.sample_rate_hz == 44100);
+	assert(out.packet_bytes == 180);
 	printf("PASS: test_packet_capacity_too_small\n");
+}
+
+static void test_invalid_endpoint_address_and_packet_bits(void)
+{
+	size_t ep;
+
+	reset_work();
+	ep = mic_ep_offset();
+	work[ep + 2] = 0x80; /* Endpoint zero is reserved. */
+	expect_fail(fixture_len, -EINVAL);
+
+	reset_work();
+	ep = mic_ep_offset();
+	work[ep + 2] = 0x91; /* Reserved address bit 4. */
+	expect_fail(fixture_len, -EINVAL);
+
+	reset_work();
+	ep = mic_ep_offset();
+	work[ep + 5] |= 0x20; /* Reserved wMaxPacketSize bit 13. */
+	expect_fail(fixture_len, -EINVAL);
+	printf("PASS: test_invalid_endpoint_address_and_packet_bits\n");
+}
+
+static void test_audio_control_header_lengths_are_consistent(void)
+{
+	size_t ac;
+
+	reset_work();
+	ac = ac_header_offset();
+	work[ac + 7] = 3; /* bInCollection exceeds the header's interface list. */
+	expect_fail(fixture_len, -EINVAL);
+
+	reset_work();
+	ac = ac_header_offset();
+	work[ac + 8] = 7; /* Declared interface 7 has no AudioStreaming alt. */
+	expect_fail(fixture_len, -EINVAL);
+
+	reset_work();
+	ac = ac_header_offset();
+	work[ac + 5]--; /* wTotalLength no longer matches the class descriptors. */
+	expect_fail(fixture_len, -EINVAL);
+
+	reset_work();
+	ac = ac_header_offset();
+	work[ac + 5]++; /* Declared class-specific length exceeds actual bytes. */
+	expect_fail(fixture_len, -EINVAL);
+	printf("PASS: test_audio_control_header_lengths_are_consistent\n");
 }
 
 static void test_truncated_format_descriptor(void)
@@ -239,6 +314,13 @@ static void test_truncated_format_descriptor(void)
 	reset_work();
 	g = mic_as_general_offset();
 	work[g + 14] = 7;
+	expect_fail(fixture_len, -EINVAL);
+
+	/* Type II format descriptor is too short even for its fixed fields. */
+	reset_work();
+	g = mic_as_general_offset();
+	work[g + 7] = 4;
+	work[g + 10] = 2;
 	expect_fail(fixture_len, -EINVAL);
 	printf("PASS: test_truncated_format_descriptor\n");
 }
@@ -290,6 +372,8 @@ int main(int argc, char **argv)
 	test_no_audio_in_endpoint();
 	test_non_pcm_format();
 	test_packet_capacity_too_small();
+	test_invalid_endpoint_address_and_packet_bits();
+	test_audio_control_header_lengths_are_consistent();
 	test_truncated_format_descriptor();
 	test_uac2_protocol_not_supported();
 	test_link_must_be_usb_streaming_output();

@@ -12,8 +12,9 @@ extern "C" {
 /*
  * Audio input stream selected from a raw USB configuration descriptor.
  * packet_bytes is the endpoint wMaxPacketSize (receive buffer size per
- * 1 ms full-speed frame); it is always >= the nominal payload of
- * sample_rate_hz * channels * subframe bytes / 1000, rounded up.
+ * 1 ms full-speed frame); it must fit ceil(sample_rate_hz / 1000) samples
+ * times channels and bytes per sample, including peak-size frames for
+ * non-integral rates.
  */
 struct usb_audio_format {
 	uint8_t interface_number;

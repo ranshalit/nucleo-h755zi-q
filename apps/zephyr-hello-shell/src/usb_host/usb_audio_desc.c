@@ -30,8 +30,11 @@
 #define EP_XFER_ISOC 0x01
 #define EP_USAGE_MASK 0x30
 #define EP_USAGE_DATA 0x00
+#define EP_ADDRESS_RESERVED_MASK 0x70
+#define EP_NUMBER_MASK 0x0f
 #define EP_MPS_SIZE_MASK 0x07ff
 #define EP_MPS_EXTRA_MASK 0x1800
+#define EP_MPS_RESERVED_MASK 0xe000
 
 #define FS_FRAMES_PER_SECOND 1000U
 #define MAX_CHANNELS 8
@@ -66,6 +69,11 @@ struct as_alt {
 struct audio_function {
 	uint16_t bcd;
 	uint8_t usb_output_terminals[32]; /* bitmap by terminal ID */
+	uint8_t collection_interfaces[32];
+	uint8_t streaming_interfaces[32];
+	uint16_t ac_total_declared;
+	size_t ac_total_observed;
+	bool ac_header_seen;
 };
 
 static uint16_t get_le16(const uint8_t *p)
@@ -81,9 +89,10 @@ static uint32_t get_le24(const uint8_t *p)
 
 static uint32_t frame_bytes(uint32_t rate, const struct as_alt *a)
 {
-	uint32_t per_sec = rate * a->channels * a->subframe_bytes;
+	uint32_t samples_per_frame =
+		(rate + FS_FRAMES_PER_SECOND - 1U) / FS_FRAMES_PER_SECOND;
 
-	return (per_sec + FS_FRAMES_PER_SECOND - 1U) / FS_FRAMES_PER_SECOND;
+	return samples_per_frame * a->channels * a->subframe_bytes;
 }
 
 static bool rate_fits(uint32_t rate, const struct as_alt *a, uint16_t mps)
@@ -114,8 +123,11 @@ static uint32_t pick_rate(const struct as_alt *a, uint16_t mps)
 			return pref;
 		}
 		/* Largest rate whose 1 ms payload fits in the packet. */
-		uint32_t max_rate = ((uint32_t)mps * FS_FRAMES_PER_SECOND) /
-				    ((uint32_t)a->channels * a->subframe_bytes);
+		uint32_t bytes_per_sample =
+			(uint32_t)a->channels * a->subframe_bytes;
+		uint32_t max_rate =
+			((uint32_t)mps / bytes_per_sample) *
+			FS_FRAMES_PER_SECOND;
 
 		best = max_rate < hi ? max_rate : hi;
 		return best >= lo && rate_fits(best, a, mps) ? best : 0;
@@ -199,14 +211,41 @@ static int parse_ac(const uint8_t *d, struct audio_function *fn)
 {
 	uint8_t len = d[0];
 
-	switch (d[2]) {
-	case AC_HEADER:
-		if (len < 8U) {
+	if (len < 3U) {
+		return -EINVAL;
+	}
+	if (d[2] == AC_HEADER) {
+		if (fn->ac_header_seen || len < 8U ||
+		    len != 8U + d[7]) {
 			return -EINVAL;
 		}
-		memset(fn, 0, sizeof(*fn));
+		fn->ac_header_seen = true;
 		fn->bcd = get_le16(&d[3]);
-		break;
+		fn->ac_total_declared = get_le16(&d[5]);
+		fn->ac_total_observed = len;
+		if (fn->ac_total_declared < len) {
+			return -EINVAL;
+		}
+		for (uint8_t i = 0; i < d[7]; i++) {
+			uint8_t interface_number = d[8U + i];
+			uint8_t mask = (uint8_t)(1U << (interface_number % 8U));
+			uint8_t *slot =
+				&fn->collection_interfaces[interface_number / 8U];
+
+			if ((*slot & mask) != 0U) {
+				return -EINVAL;
+			}
+			*slot |= mask;
+		}
+		return 0;
+	}
+	if (!fn->ac_header_seen ||
+	    fn->ac_total_observed + len > fn->ac_total_declared) {
+		return -EINVAL;
+	}
+	fn->ac_total_observed += len;
+
+	switch (d[2]) {
 	case AC_OUTPUT_TERMINAL:
 		if (len < 9U) {
 			return -EINVAL;
@@ -221,6 +260,25 @@ static int parse_ac(const uint8_t *d, struct audio_function *fn)
 			return -EINVAL;
 		}
 		break;
+	}
+	return 0;
+}
+
+static int finish_ac(const struct audio_function *fn)
+{
+	return fn->ac_header_seen &&
+	       fn->ac_total_observed == fn->ac_total_declared ? 0 : -EINVAL;
+}
+
+static int validate_ac_interfaces(const struct audio_function *fn)
+{
+	if (!fn->ac_header_seen) {
+		return 0;
+	}
+	for (size_t i = 0; i < sizeof(fn->collection_interfaces); i++) {
+		if (fn->collection_interfaces[i] != fn->streaming_interfaces[i]) {
+			return -EINVAL;
+		}
 	}
 	return 0;
 }
@@ -250,23 +308,37 @@ static int parse_as(const uint8_t *d, struct as_alt *a,
 		}
 		a->have_format = true;
 		a->format_type = d[3];
-		if (d[3] != FORMAT_TYPE_I) {
+		if (d[3] == 0x02U) {
+			if (len < 9U) {
+				return -EINVAL;
+			}
+			uint8_t n = d[8];
+			size_t need = 9U + (n == 0U ? 6U : 3U * (size_t)n);
+
+			if (len < need) {
+				return -EINVAL;
+			}
 			return 0;
 		}
-		if (len < 8U) {
-			return -EINVAL;
-		}
-		uint8_t n = d[7];
-		size_t need = 8U + (n == 0U ? 6U : 3U * (size_t)n);
+		if (d[3] == FORMAT_TYPE_I || d[3] == 0x03U) {
+			if (len < 8U) {
+				return -EINVAL;
+			}
+			uint8_t n = d[7];
+			size_t need = 8U + (n == 0U ? 6U : 3U * (size_t)n);
 
-		if (len < need) {
-			return -EINVAL;
+			if (len < need) {
+				return -EINVAL;
+			}
+			if (d[3] != FORMAT_TYPE_I) {
+				return 0;
+			}
+			a->channels = d[4];
+			a->subframe_bytes = d[5];
+			a->bit_resolution = d[6];
+			a->rate_count = n;
+			a->rates = &d[8];
 		}
-		a->channels = d[4];
-		a->subframe_bytes = d[5];
-		a->bit_resolution = d[6];
-		a->rate_count = n;
-		a->rates = &d[8];
 	}
 	return 0;
 }
@@ -311,9 +383,22 @@ int usb_audio_select_input(const uint8_t *raw, size_t length,
 			if (d[0] < 9U) {
 				return -EINVAL;
 			}
+			if (if_class == USB_CLASS_AUDIO &&
+			    if_subclass == AUDIO_SUBCLASS_CONTROL) {
+				rc = finish_ac(&fn);
+				if (rc != 0) {
+					return rc;
+				}
+			}
 			finish_alt(&alt, &best, &have_best);
 			if_class = d[5];
 			if_subclass = d[6];
+			if (if_class == USB_CLASS_AUDIO &&
+			    if_subclass == AUDIO_SUBCLASS_STREAMING) {
+				uint8_t *slot = &fn.streaming_interfaces[d[2] / 8U];
+
+				*slot |= (uint8_t)(1U << (d[2] % 8U));
+			}
 			if (if_class == USB_CLASS_AUDIO &&
 			    if_subclass == AUDIO_SUBCLASS_STREAMING) {
 				alt.active = true;
@@ -325,6 +410,11 @@ int usb_audio_select_input(const uint8_t *raw, size_t length,
 			break;
 		case DESC_ENDPOINT:
 			if (d[0] < 7U) {
+				return -EINVAL;
+			}
+			if ((d[2] & EP_NUMBER_MASK) == 0U ||
+			    (d[2] & EP_ADDRESS_RESERVED_MASK) != 0U ||
+			    (get_le16(&d[4]) & EP_MPS_RESERVED_MASK) != 0U) {
 				return -EINVAL;
 			}
 			/* First isochronous data endpoint carries the stream. */
@@ -357,7 +447,17 @@ int usb_audio_select_input(const uint8_t *raw, size_t length,
 		}
 		off += d[0];
 	}
+	if (if_class == USB_CLASS_AUDIO &&
+	    if_subclass == AUDIO_SUBCLASS_CONTROL) {
+		rc = finish_ac(&fn);
+		if (rc != 0) {
+			return rc;
+		}
+	}
 	finish_alt(&alt, &best, &have_best);
+	if (validate_ac_interfaces(&fn) != 0) {
+		return -EINVAL;
+	}
 
 	if (!have_best) {
 		return -ENOTSUP;
