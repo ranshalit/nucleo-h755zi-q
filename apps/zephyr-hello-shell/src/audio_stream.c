@@ -212,7 +212,8 @@ static void audio_thread_entry(void *p1, void *p2, void *p3)
 		.sin_port = htons(AUDIO_PORT),
 		.sin_addr.s_addr = htonl(INADDR_ANY),
 	};
-	struct audio_client client = {.fd = -1};
+	/* Static: the 2.4 KB client buffers would nearly fill the thread stack. */
+	static struct audio_client client = {.fd = -1};
 	struct zsock_pollfd fds[2];
 	int server;
 
