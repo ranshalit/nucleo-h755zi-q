@@ -16,11 +16,14 @@
 
 LOG_MODULE_REGISTER(audio_stream, LOG_LEVEL_INF);
 
+#ifndef AUDIO_PORT
 #define AUDIO_PORT 8082
+#endif
 #define AUDIO_STACK_SIZE 4096
 #define AUDIO_POLL_MS 4
 #define AUDIO_REQUEST_MS 2000
 #define AUDIO_STALL_MS 250
+#define AUDIO_ERROR_MS 20
 #define AUDIO_REQUEST_SIZE 384
 #define AUDIO_CHUNK_SIZE 2048
 
@@ -40,18 +43,41 @@ struct audio_client {
 	bool streaming;
 };
 
-/* Error replies are small and bounded, even for a peer that does not read. */
+/*
+ * Error replies are small; write them fully, but within a short bound so a
+ * peer that does not read cannot stall the active stream.
+ */
 static void send_error(int fd, const char *status, const char *reason)
 {
 	char response[256];
+	int64_t deadline = k_uptime_get() + AUDIO_ERROR_MS;
+	size_t sent = 0;
 	int n = snprintk(response, sizeof(response),
 			 "HTTP/1.1 %s\r\nContent-Type: text/plain\r\n"
 			 "Cache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n"
 			 "Connection: close\r\nContent-Length: %u\r\n\r\n%s",
 			 status, (unsigned int)strlen(reason), reason);
 
-	if (n > 0 && (size_t)n < sizeof(response)) {
-		(void)zsock_send(fd, response, (size_t)n, ZSOCK_MSG_DONTWAIT);
+	if (n <= 0 || (size_t)n >= sizeof(response)) {
+		return;
+	}
+	while (sent < (size_t)n) {
+		ssize_t r = zsock_send(fd, response + sent, (size_t)n - sent,
+				       ZSOCK_MSG_DONTWAIT);
+		struct zsock_pollfd pfd = {.fd = fd, .events = ZSOCK_POLLOUT};
+		int64_t left;
+
+		if (r > 0) {
+			sent += (size_t)r;
+			continue;
+		}
+		if (r == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+			return;
+		}
+		left = deadline - k_uptime_get();
+		if (left <= 0 || zsock_poll(&pfd, 1, (int)left) <= 0) {
+			return;
+		}
 	}
 }
 
@@ -214,7 +240,8 @@ static void audio_thread_entry(void *p1, void *p2, void *p3)
 			.events = client.streaming && client.offset < client.length ?
 					  (ZSOCK_POLLOUT | ZSOCK_POLLIN) : ZSOCK_POLLIN,
 		};
-		int count = zsock_poll(fds, client.fd >= 0 ? 2 : 1, AUDIO_POLL_MS);
+		bool client_polled = client.fd >= 0;
+		int count = zsock_poll(fds, client_polled ? 2 : 1, AUDIO_POLL_MS);
 
 		if (count < 0) {
 			k_msleep(AUDIO_POLL_MS);
@@ -242,7 +269,11 @@ static void audio_thread_entry(void *p1, void *p2, void *p3)
 				}
 			}
 		}
-		if (client.fd < 0) {
+		/*
+		 * fds[1].revents is only valid if the client was polled; a client
+		 * accepted just now is handled on the next (immediate) poll.
+		 */
+		if (client.fd < 0 || !client_polled) {
 			continue;
 		}
 		if (k_uptime_get() >= client.deadline ||
