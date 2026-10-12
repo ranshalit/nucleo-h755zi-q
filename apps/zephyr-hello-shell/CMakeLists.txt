@@ -76,6 +76,8 @@ target_sources(app PRIVATE
   src/mjpeg_multipart.c
   src/camera_frames.c
   src/camera_stream.c
+  src/audio_wire.c
+  src/audio_stream.c
   src/usb_host/usb_boot_mouse_report.c
   ${board_sources}
 )

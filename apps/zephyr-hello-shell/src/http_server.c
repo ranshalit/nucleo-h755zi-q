@@ -23,12 +23,14 @@
 
 #include "board_io.h"
 #include "board_temperature.h"
+#include "usb_audio_capture.h"
 #include "usb_boot_mouse.h"
 #include "web_assets.h"
 
 #define JSON_RESPONSE_BUF_SIZE 1024
 #define DASHBOARD_RESPONSE_BUF_SIZE 2048
 #define MOUSE_RESPONSE_BUF_SIZE 256
+#define MIC_RESPONSE_BUF_SIZE 384
 #define LED_POST_BUF_SIZE 64
 
 struct led_command {
@@ -60,6 +62,12 @@ static const struct http_header mouse_response_headers[] = {
 		.name = "Cache-Control",
 		.value = "no-store",
 	},
+};
+
+static const struct http_header mic_response_headers[] = {
+	{ .name = "Connection", .value = "close" },
+	{ .name = "Cache-Control", .value = "no-store" },
+	{ .name = "Access-Control-Allow-Origin", .value = "*" },
 };
 
 struct static_asset {
@@ -616,6 +624,76 @@ static struct http_resource_detail_dynamic mouse_resource_detail = {
 	.user_data = NULL,
 };
 
+static int mic_handler(struct http_client_ctx *client, enum http_data_status status,
+		       const struct http_request_ctx *request_ctx,
+		       struct http_response_ctx *response_ctx, void *user_data)
+{
+	static char __noinit response[MIC_RESPONSE_BUF_SIZE];
+	struct usb_audio_snapshot mic;
+	size_t offset = 0;
+	const char *reason;
+	int ret;
+
+	ARG_UNUSED(request_ctx);
+	ARG_UNUSED(user_data);
+	if (status != HTTP_SERVER_DATA_FINAL) {
+		return 0;
+	}
+
+	usb_audio_snapshot_get(&mic);
+	reason = mic.reason != NULL ? mic.reason : "microphone unavailable";
+	ret = append_to_buffer(response, sizeof(response), &offset,
+			       "{\"attached\":%s,\"ready\":%s,\"session\":%u,"
+			       "\"format\":{\"sample_rate_hz\":%u,\"channels\":%u,"
+			       "\"bits_per_sample\":%u},\"level\":%u,\"packets\":%u,"
+			       "\"drops\":%u,\"errors\":%u,\"missed\":%u,\"reason\":\"",
+			       json_bool(mic.connected), json_bool(mic.ready), mic.session,
+			       mic.sample_rate_hz, mic.channels, mic.bits_per_sample,
+			       mic.level, mic.packets, mic.drops, mic.errors, mic.missed);
+	if (ret != 0) {
+		goto overflow;
+	}
+	/* Escape the diagnostic string rather than trusting USB-facing state as JSON. */
+	for (const unsigned char *p = (const unsigned char *)reason; *p != '\0'; ++p) {
+		if (*p == '"' || *p == '\\') {
+			ret = append_to_buffer(response, sizeof(response), &offset, "\\%c", *p);
+		} else if (*p < 0x20U) {
+			ret = append_to_buffer(response, sizeof(response), &offset, "\\u%04x", *p);
+		} else {
+			ret = append_to_buffer(response, sizeof(response), &offset, "%c", *p);
+		}
+		if (ret != 0) {
+			goto overflow;
+		}
+	}
+	ret = append_to_buffer(response, sizeof(response), &offset, "\"}");
+	if (ret != 0) {
+		goto overflow;
+	}
+	populate_response(client, response_ctx, HTTP_200_OK, response, offset);
+	response_ctx->headers = mic_response_headers;
+	response_ctx->header_count = ARRAY_SIZE(mic_response_headers);
+	return 0;
+
+overflow:
+	ret = send_internal_error(client, response_ctx, response, sizeof(response));
+	if (ret == 0) {
+		response_ctx->headers = mic_response_headers;
+		response_ctx->header_count = ARRAY_SIZE(mic_response_headers);
+	}
+	return ret;
+}
+
+static struct http_resource_detail_dynamic mic_resource_detail = {
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_DYNAMIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_type = "application/json",
+		},
+	.cb = mic_handler,
+};
+
 static int dashboard_handler(struct http_client_ctx *client, enum http_data_status status,
 			     const struct http_request_ctx *request_ctx,
 			     struct http_response_ctx *response_ctx, void *user_data)
@@ -763,6 +841,7 @@ HTTP_RESOURCE_DEFINE(dashboard_api_resource, board_http_service, "/api/v1/dashbo
 HTTP_RESOURCE_DEFINE(status_resource, board_http_service, "/api/v1/status", &status_resource_detail);
 HTTP_RESOURCE_DEFINE(io_resource, board_http_service, "/api/v1/io", &io_resource_detail);
 HTTP_RESOURCE_DEFINE(mouse_resource, board_http_service, "/api/v1/mouse", &mouse_resource_detail);
+HTTP_RESOURCE_DEFINE(mic_resource, board_http_service, "/api/v1/mic", &mic_resource_detail);
 HTTP_RESOURCE_DEFINE(leds_resource, board_http_service, "/api/v1/leds", &leds_resource_detail);
 
 int board_http_server_start(void)

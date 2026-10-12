@@ -11,6 +11,7 @@
 #include <zephyr/shell/shell_string_conv.h>
 
 #include "board_io.h"
+#include "audio_stream.h"
 #include "camera_stream.h"
 #include "http_server.h"
 
@@ -289,6 +290,13 @@ int main(void)
 	} else {
 		printf("Camera stream listening on http://%s:%u/\n",
 		       http_host, camera_stream_port());
+	}
+
+	ret = audio_stream_start();
+	if (ret != 0) {
+		printf("Microphone stream startup failed: %d\n", ret);
+	} else {
+		printf("Microphone stream listening on http://%s:8082/\n", http_host);
 	}
 
 	return 0;
