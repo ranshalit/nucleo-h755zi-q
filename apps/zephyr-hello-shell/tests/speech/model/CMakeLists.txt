@@ -10,7 +10,7 @@ target_sources(app PRIVATE src/main.c
   "${APP_ROOT}/src/speech/speech_service.c"
   "${APP_ROOT}/src/speech/speech_audio.c"
   "${APP_ROOT}/src/speech/speech_decision.c")
-foreach(fixture yes_1000ms no_1000ms silence_1000ms yes_30ms no_30ms)
+foreach(fixture yes_1000ms no_1000ms silence_1000ms noise_1000ms yes_30ms no_30ms)
   generate_inc_file_for_target(app
     "${SPEECH_TFLM_DIR}/tensorflow/lite/micro/examples/micro_speech/testdata/${fixture}.wav"
     "${ZEPHYR_BINARY_DIR}/include/generated/${fixture}.inc")

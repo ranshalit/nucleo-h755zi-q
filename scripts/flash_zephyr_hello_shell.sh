@@ -217,6 +217,7 @@ build_app() {
     picolibc_specs="$("${CROSS_COMPILE}gcc" -print-file-name=picolibc.specs)"
     if [[ -f "${picolibc_specs}" ]]; then
       toolchain_args+=("-DTOOLCHAIN_HAS_PICOLIBC=ON")
+      toolchain_args+=("-DCONFIG_TOOLCHAIN_CROSS_COMPILE_SUPPORTS_THREAD_LOCAL_STORAGE=y")
     fi
   fi
   log "building ${APP_DIR} for ${BOARD}"

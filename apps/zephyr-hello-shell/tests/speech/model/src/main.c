@@ -15,6 +15,9 @@ static const uint8_t no_audio[] = {
 static const uint8_t silence_audio[] = {
 #include <silence_1000ms.inc>
 };
+static const uint8_t noise_audio[] = {
+#include <noise_1000ms.inc>
+};
 static const uint8_t yes_feature[] = {
 #include <yes_30ms.inc>
 };
@@ -130,6 +133,7 @@ int main(void)
 	classify(yes_audio, sizeof(yes_audio), 2);
 	classify(no_audio, sizeof(no_audio), 3);
 	classify(silence_audio, sizeof(silence_audio), 0);
+	classify(noise_audio, sizeof(noise_audio), 0);
 	/* Reset must reproduce the initial frontend state. */
 	classify(yes_audio, sizeof(yes_audio), 2);
 	printf("PASS: model fixtures; arenas frontend=%zu classifier=%zu\n",

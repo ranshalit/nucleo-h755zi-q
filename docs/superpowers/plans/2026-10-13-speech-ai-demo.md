@@ -520,3 +520,27 @@ hardware measurements and documentation. No task changes LEDs or requires
 training. Complete the reference/runtime gate before claiming live speech
 recognition, and complete measured hardware checks before claiming verified
 board accuracy.
+
+## Execution record (2026-10-13)
+
+- [x] Task 1: pinned runtime/models, exact frontend reference vectors, yes/no/silence/noise fixture inference.
+- [x] Task 2: independent bounded queue and streaming filtered decimator; measured host stopband rejection 62.5 dB.
+- [x] Task 3: threshold, cadence, quiet rearm, repeated-event suppression, tie and reset tests.
+- [x] Task 4: capture fan-out, worker, lifecycle resets, shell diagnostics and simulator unavailable state.
+- [x] Task 5: bounded JSON API, dashboard card and browser regression tests; existing PCM stream regressions pass.
+- [x] Task 6 implementation/documentation: M7 firmware built and flashed, both native profiles built, actual board/model measurements documented in README.
+- [ ] Remaining controlled acceptance: independently timed/scored utterances, labeled unrelated speech, full-minute all-three camera/audio/inference browser run, and physical USB mouse swap.
+
+Final measured firmware: 1027588 bytes flash (98.00%), 400944 bytes RAM
+(76.47%). Physical board API reports running with no recognition queue drops
+or audio gaps after final flash. User reported 9/10 yes and 9/10 no.
+One-minute microphone playback with ambient room noise produced no new
+keyword events or transfer errors. Separate ten-second browser check showed
+camera, microphone and speech together. A longer browser check was interrupted
+when its frame detached; it is not counted as completed acceptance.
+
+Execution deviations: CMake source-level size optimization is needed for
+TFLM runtime/glue because the initial speed-optimized integration exceeded the
+configured 1 MiB flash. The existing CMSIS-NN implementation remains speed
+optimized. The standalone SDK also requires explicit Picolibc/TLS detection
+in the board build script. USB polling cadence and LED behavior are unchanged.

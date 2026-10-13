@@ -159,6 +159,12 @@ function checkLiveBoardHeaders(host, retryBusy = false, attempt = 0) {
       return send(res, 200, 'application/json', JSON.stringify({ button: {}, leds: [], mouse: { connected: false } }));
     }
     if (req.url === '/api/v1/mic') { return send(res, 200, 'application/json', JSON.stringify(micStatus)); }
+    if (req.url === '/api/v1/speech') {
+      return send(res, 200, 'application/json', JSON.stringify({
+        state: 'unavailable', reason: 'test fixture has no speech model',
+        label: null, score: null, last_event: null,
+      }));
+    }
     return send(res, 404, 'text/plain', 'not found');
   });
   streamServer = http.createServer((req, res) => runStream(res, streamMode));

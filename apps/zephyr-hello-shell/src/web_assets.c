@@ -101,7 +101,7 @@ const uint8_t board_http_index_html[] =
     "        <article class=\"mic-card\">\n"
     "          <div class=\"panel-header compact\"><h3>Speech AI</h3><span id=\"speech-state\" class=\"badge\" data-tone=\"muted\">unavailable</span></div>\n"
     "          <p class=\"helper-text\">English yes/no recognition runs on the STM32, offline. Listening is optional; LEDs stay unchanged.</p>\n"
-    "          <strong id=\"speech-label\">--</strong>\n"
+    "          <p class=\"helper-text\">Current model class (not an accepted command):</p><strong id=\"speech-label\">--</strong>\n"
     "          <p id=\"speech-score\" class=\"helper-text\">Model score: --</p>\n"
     "          <p id=\"speech-event\" class=\"helper-text\" aria-live=\"polite\">No accepted keyword</p>\n"
     "          <p id=\"speech-timing\" class=\"helper-text\">Inference unavailable</p>\n"
