@@ -160,6 +160,127 @@ static void expect_stream_header(int fd)
 	assert((uint8_t)end[12] == SESSION);
 }
 
+static void send_fragmented(int fd, const char *data, size_t length)
+{
+	size_t sent = 0;
+
+	while (sent < length) {
+		size_t chunk = length - sent;
+
+		if (chunk > 113U) {
+			chunk = 113U;
+		}
+		ssize_t n = send(fd, data + sent, chunk, MSG_NOSIGNAL);
+
+		if (n <= 0) {
+			return;
+		}
+		sent += (size_t)n;
+		k_msleep(5);
+	}
+}
+
+static void expect_stream_response(int fd)
+{
+	char buf[512];
+	const char *end;
+	size_t got = read_some(fd, buf, 160U, 1000);
+
+	buf[got] = '\0';
+	end = strstr(buf, "\r\n\r\n");
+	assert(strncmp(buf, "HTTP/1.1 200 OK\r\n", 17) == 0);
+	assert(end != NULL);
+	end += 4;
+	assert((size_t)(end - buf) + 16U <= got);
+	assert(memcmp(end, "MIC1", 4) == 0);
+	assert((uint8_t)end[12] == SESSION);
+}
+
+static void test_edge_request_larger_than_legacy_limit(void)
+{
+	static const char edge_headers[] =
+		"GET / HTTP/1.1\r\n"
+		"Host: 192.168.55.2:8082\r\n"
+		"Connection: keep-alive\r\n"
+		"sec-ch-ua-platform: \"Linux\"\r\n"
+		"User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+		"(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0\r\n"
+		"sec-ch-ua: \"Microsoft Edge\";v=\"141\", \"Not?A_Brand\";v=\"8\", "
+		"\"Chromium\";v=\"141\"\r\n"
+		"sec-ch-ua-mobile: ?0\r\n"
+		"Accept: */*\r\n"
+		"Origin: http://192.168.55.2\r\n"
+		"Sec-Fetch-Site: same-site\r\n"
+		"Sec-Fetch-Mode: cors\r\n"
+		"Sec-Fetch-Dest: empty\r\n"
+		"Referer: http://192.168.55.2/\r\n"
+		"Accept-Encoding: gzip, deflate\r\n"
+		"Accept-Language: en-US,en;q=0.9,he;q=0.8\r\n"
+		"Cookie: dashboard-session=";
+	char request[2048];
+	size_t length = sizeof(edge_headers) - 1U;
+	int fd;
+
+	memcpy(request, edge_headers, length);
+	memset(request + length, 'a', 1100U);
+	length += 1100U;
+	memcpy(request + length, "\r\n\r\n", 4U);
+	length += 4U;
+	assert(length > 1500U && length < sizeof(request));
+
+	k_msleep(50);
+	fd = connect_client();
+	/* Hold the final CRLFCRLF terminator across distinct recv opportunities. */
+	send_fragmented(fd, request, length - 3U);
+	k_msleep(15);
+	send_fragmented(fd, request + length - 3U, 3U);
+	expect_stream_response(fd);
+	close(fd);
+	printf("PASS: fragmented ~1.5 KB Edge request returns 200 + MIC1\n");
+}
+
+static void test_oversized_request_gets_400(void)
+{
+	char request[8300];
+	char response[512];
+	static const char prefix[] = "GET / HTTP/1.1\r\nX-Padding: ";
+	int fd;
+	size_t length = sizeof(prefix) - 1U;
+	size_t got;
+
+	memcpy(request, prefix, length);
+	memset(request + length, 'x', 8192U);
+	length += 8192U;
+	memcpy(request + length, "\r\n\r\n", 4U);
+	length += 4U;
+
+	k_msleep(50);
+	fd = connect_client();
+	send_fragmented(fd, request, length);
+	got = read_until_eof(fd, response, sizeof(response), 1000);
+	assert(got > 0U);
+	assert(strncmp(response, "HTTP/1.1 400 Bad Request\r\n", 26) == 0);
+	assert(strstr(response, "\r\n\r\nrequest too large") != NULL);
+	close(fd);
+	printf("PASS: request exceeding aggregate header cap gets 400\n");
+}
+
+static void test_query_path_is_accepted(void)
+{
+	static const char request[] = "GET /?probe=1 HTTP/1.1\r\nHost: test\r\n\r\n";
+	char buf[512];
+	int fd;
+	size_t got;
+
+	k_msleep(50);
+	fd = connect_client();
+	assert(send(fd, request, sizeof(request) - 1U, 0) == (ssize_t)(sizeof(request) - 1U));
+	got = read_some(fd, buf, 160U, 1000);
+	assert(got >= 17U && memcmp(buf, "HTTP/1.1 200 OK\r\n", 17) == 0);
+	close(fd);
+	printf("PASS: root query path is accepted\n");
+}
+
 static void test_new_client_is_served(void)
 {
 	int fd = connect_client();
@@ -237,6 +358,9 @@ int main(void)
 	test_busy_is_prompt_409();
 	test_slot_reused_after_close();
 	test_bad_request_gets_complete_400();
+	test_edge_request_larger_than_legacy_limit();
+	test_oversized_request_gets_400();
+	test_query_path_is_accepted();
 	printf("ALL TESTS PASSED\n");
 	exit(0);
 }

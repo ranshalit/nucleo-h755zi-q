@@ -24,7 +24,9 @@ LOG_MODULE_REGISTER(audio_stream, LOG_LEVEL_INF);
 #define AUDIO_REQUEST_MS 2000
 #define AUDIO_STALL_MS 250
 #define AUDIO_ERROR_MS 20
-#define AUDIO_REQUEST_SIZE 384
+#define AUDIO_REQUEST_SIZE 8192
+#define AUDIO_REQUEST_LINE_SIZE 256
+#define AUDIO_RECV_SIZE 128
 #define AUDIO_CHUNK_SIZE 2048
 
 K_THREAD_STACK_DEFINE(audio_stack, AUDIO_STACK_SIZE);
@@ -33,8 +35,11 @@ static bool audio_started;
 
 struct audio_client {
 	int fd;
-	char request[AUDIO_REQUEST_SIZE + 1];
-	size_t request_len;
+	char request_line[AUDIO_REQUEST_LINE_SIZE];
+	size_t request_line_len;
+	size_t request_bytes;
+	uint8_t header_match;
+	bool request_line_done;
 	uint8_t data[AUDIO_CHUNK_SIZE];
 	size_t length;
 	size_t offset;
@@ -92,10 +97,37 @@ static void close_client(struct audio_client *client)
 	client->offset = 0;
 }
 
-static bool valid_request(const char *request)
+static bool valid_request_line(const char *line, size_t length)
 {
-	return strncmp(request, "GET / HTTP/1.1\r\n", 16) == 0 ||
-	       strncmp(request, "GET / HTTP/1.0\r\n", 16) == 0;
+	const char *target;
+	const char *space;
+	size_t target_len;
+	size_t version_len;
+
+	if (length < 14U || memcmp(line, "GET ", 4U) != 0) {
+		return false;
+	}
+	target = line + 4;
+	space = memchr(target, ' ', length - 4U);
+	if (space == NULL) {
+		return false;
+	}
+	target_len = (size_t)(space - target);
+	if (target_len == 1U) {
+		if (target[0] != '/') {
+			return false;
+		}
+	} else if (target_len < 2U || target[0] != '/' || target[1] != '?') {
+		return false;
+	}
+	for (size_t i = 0; i < target_len; ++i) {
+		if ((unsigned char)target[i] <= 0x20U || target[i] == 0x7f) {
+			return false;
+		}
+	}
+	version_len = length - (size_t)(space + 1 - line);
+	return (version_len == 8U && memcmp(space + 1, "HTTP/1.0", 8U) == 0) ||
+	       (version_len == 8U && memcmp(space + 1, "HTTP/1.1", 8U) == 0);
 }
 
 static void accept_request(struct audio_client *client)
@@ -104,12 +136,6 @@ static void accept_request(struct audio_client *client)
 	char header[192];
 	uint8_t wire[16];
 	int n;
-
-	if (!valid_request(client->request)) {
-		send_error(client->fd, "400 Bad Request", "expected GET /");
-		close_client(client);
-		return;
-	}
 
 	usb_audio_snapshot_get(&snapshot);
 	if (!snapshot.connected || !snapshot.ready || snapshot.session == 0U ||
@@ -153,10 +179,16 @@ static void accept_request(struct audio_client *client)
 	client->deadline = k_uptime_get() + AUDIO_STALL_MS;
 }
 
+static void reject_bad_request(struct audio_client *client)
+{
+	send_error(client->fd, "400 Bad Request", "expected GET /");
+	close_client(client);
+}
+
 static void receive_request(struct audio_client *client)
 {
-	ssize_t n = zsock_recv(client->fd, client->request + client->request_len,
-			       AUDIO_REQUEST_SIZE - client->request_len, ZSOCK_MSG_DONTWAIT);
+	char incoming[AUDIO_RECV_SIZE];
+	ssize_t n = zsock_recv(client->fd, incoming, sizeof(incoming), ZSOCK_MSG_DONTWAIT);
 
 	if (n <= 0) {
 		if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
@@ -164,13 +196,62 @@ static void receive_request(struct audio_client *client)
 		}
 		return;
 	}
-	client->request_len += (size_t)n;
-	client->request[client->request_len] = '\0';
-	if (strstr(client->request, "\r\n\r\n") != NULL) {
-		accept_request(client);
-	} else if (client->request_len == AUDIO_REQUEST_SIZE) {
-		send_error(client->fd, "400 Bad Request", "request too large");
-		close_client(client);
+
+	for (ssize_t i = 0; i < n; ++i) {
+		char byte = incoming[i];
+
+		if (++client->request_bytes > AUDIO_REQUEST_SIZE) {
+			send_error(client->fd, "400 Bad Request", "request too large");
+			close_client(client);
+			return;
+		}
+		if (!client->request_line_done) {
+			if (client->request_line_len >= sizeof(client->request_line) - 1U) {
+				reject_bad_request(client);
+				return;
+			}
+			client->request_line[client->request_line_len++] = byte;
+			if (byte == '\n' && client->request_line_len >= 2U &&
+			    client->request_line[client->request_line_len - 2U] == '\r') {
+				client->request_line_len -= 2U;
+				client->request_line[client->request_line_len] = '\0';
+				client->request_line_done = true;
+				if (!valid_request_line(client->request_line, client->request_line_len)) {
+					reject_bad_request(client);
+					return;
+				}
+			} else if (byte == '\n') {
+				reject_bad_request(client);
+				return;
+			}
+		}
+
+		/* Four-byte CRLFCRLF matcher, including sequences split between recv calls. */
+		switch (client->header_match) {
+		case 0:
+			client->header_match = byte == '\r' ? 1U : 0U;
+			break;
+		case 1:
+			client->header_match = byte == '\n' ? 2U : (byte == '\r' ? 1U : 0U);
+			break;
+		case 2:
+			client->header_match = byte == '\r' ? 3U : 0U;
+			break;
+		case 3:
+			if (byte == '\n') {
+				if (!client->request_line_done) {
+					reject_bad_request(client);
+				} else {
+					accept_request(client);
+				}
+				return;
+			}
+			client->header_match = byte == '\r' ? 1U : 0U;
+			break;
+		default:
+			client->header_match = 0U;
+			break;
+		}
 	}
 }
 
@@ -263,7 +344,10 @@ static void audio_thread_entry(void *p1, void *p2, void *p3)
 					zsock_close(fd);
 				} else {
 					client.fd = fd;
-					client.request_len = 0;
+					client.request_line_len = 0;
+					client.request_bytes = 0;
+					client.header_match = 0;
+					client.request_line_done = false;
 					client.length = 0;
 					client.streaming = false;
 					client.deadline = k_uptime_get() + AUDIO_REQUEST_MS;
