@@ -12,3 +12,7 @@ cc -std=c11 -Wall -Wextra -Werror -I"${APP}/src/speech" -I"${APP}/src/usb_host" 
   "${APP}/tests/speech/test_speech_decision.c" "${APP}/src/speech/speech_decision.c" \
   -o "${BUILD}/test_decision"
 "${BUILD}/test_decision"
+cc -std=c11 -Wall -Wextra -Werror -I"${APP}/src/speech" -I"${APP}/src/usb_host" \
+  "${APP}/tests/speech/test_speech_json.c" "${APP}/src/speech/speech_json.c" \
+  -o "${BUILD}/test_json"
+"${BUILD}/test_json"

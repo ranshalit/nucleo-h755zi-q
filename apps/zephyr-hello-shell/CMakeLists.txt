@@ -91,6 +91,7 @@ target_sources(app PRIVATE
   src/audio_wire.c
   src/audio_stream.c
   src/speech/speech_service.c
+  src/speech/speech_json.c
   src/usb_host/usb_boot_mouse_report.c
   ${board_sources}
 )
