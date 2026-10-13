@@ -93,6 +93,7 @@ USBH_StatusTypeDef USBH_Stop(USBH_HandleTypeDef *phost);
 USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost);
 USBH_StatusTypeDef USBH_ReEnumerate(USBH_HandleTypeDef *phost);
 USBH_StatusTypeDef USBH_RegisterClass(USBH_HandleTypeDef *phost, USBH_ClassTypeDef *pclass);
+uint8_t            USBH_ClassMatches(USBH_HandleTypeDef *phost, USBH_ClassTypeDef *pclass);
 USBH_StatusTypeDef USBH_SelectInterface(USBH_HandleTypeDef *phost, uint8_t interface);
 
 uint8_t            USBH_FindInterfaceIndex(USBH_HandleTypeDef *phost, uint8_t interface_number, uint8_t alt_settings);

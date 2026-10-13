@@ -258,6 +258,31 @@ static USBH_StatusTypeDef DeInitStateMachine(USBH_HandleTypeDef *phost)
 
 
 /**
+  * @brief  USBH_ClassMatches
+  *         Decide whether a registered class can drive the attached device.
+  *         The default scans every parsed interface for the class code;
+  *         applications may override it to match a specific function.
+  * @param  phost : Host Handle
+  * @param  pclass: Registered class
+  * @retval 1 if the class should be started, 0 otherwise
+  */
+__weak uint8_t USBH_ClassMatches(USBH_HandleTypeDef *phost, USBH_ClassTypeDef *pclass)
+{
+  uint8_t idx;
+
+  for (idx = 0U; (idx < phost->device.CfgDesc.bNumInterfaces) &&
+       (idx < USBH_MAX_NUM_INTERFACES); idx++)
+  {
+    if (phost->device.CfgDesc.Itf_Desc[idx].bInterfaceClass == pclass->ClassCode)
+    {
+      return 1U;
+    }
+  }
+
+  return 0U;
+}
+
+/**
   * @brief  USBH_RegisterClass
   *         Link class driver to Host Core.
   * @param  phost : Host Handle
@@ -680,9 +705,10 @@ USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost)
       {
         phost->pActiveClass = NULL;
 
-        for (idx = 0U; idx < USBH_MAX_NUM_SUPPORTED_CLASS; idx++)
+        for (idx = 0U; (idx < phost->ClassNumber) && (idx < USBH_MAX_NUM_SUPPORTED_CLASS); idx++)
         {
-          if (phost->pClass[idx]->ClassCode == phost->device.CfgDesc.Itf_Desc[0].bInterfaceClass)
+          if ((phost->pClass[idx] != NULL) &&
+              (USBH_ClassMatches(phost, phost->pClass[idx]) != 0U))
           {
             phost->pActiveClass = phost->pClass[idx];
             break;

@@ -15,6 +15,10 @@ if(BOARD STREQUAL "nucleo_h755zi_q/stm32h755xx/m7")
     src/usb_host/usb_gpio_capture.c
     src/usb_host/usb_host_shell.c
     src/usb_host/usb_boot_mouse_class.c
+    src/usb_host/usb_audio_capture.c
+    src/usb_host/usb_audio_buffer.c
+    src/usb_host/usb_audio_desc.c
+    src/usb_host/usb_class_select.c
     third_party/stm32-mw-usb-host/Core/Src/usbh_core.c
     third_party/stm32-mw-usb-host/Core/Src/usbh_ctlreq.c
     third_party/stm32-mw-usb-host/Core/Src/usbh_ioreq.c
@@ -54,6 +58,10 @@ endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_hello_shell)
 
+if(extra_conf_file)
+  include(cmake/patch_stm32_hcd.cmake)
+endif()
+
 if(DEFINED ENV{SOURCE_DATE_EPOCH} AND
    NOT "$ENV{SOURCE_DATE_EPOCH}" MATCHES "^[0-9]+$")
   message(FATAL_ERROR "SOURCE_DATE_EPOCH must be a nonnegative integer")
@@ -72,6 +80,8 @@ target_sources(app PRIVATE
   src/mjpeg_multipart.c
   src/camera_frames.c
   src/camera_stream.c
+  src/audio_wire.c
+  src/audio_stream.c
   src/usb_host/usb_boot_mouse_report.c
   ${board_sources}
 )

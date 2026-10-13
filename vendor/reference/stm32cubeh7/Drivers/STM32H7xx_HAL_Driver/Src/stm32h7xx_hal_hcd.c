@@ -603,6 +603,19 @@ void HAL_HCD_IRQHandler(HCD_HandleTypeDef *hhcd)
       __HAL_HCD_CLEAR_FLAG(hhcd, USB_OTG_GINTSTS_SOF);
     }
 
+    /*
+     * Drain every queued receive status entry before channel completion
+     * callbacks. For IN transfers, HCINT/XFRC may be pending at the same
+     * time as RXFLVL; dispatching HCINT first exposes URB_DONE while the
+     * payload is still only in the RX FIFO.
+     */
+    while (__HAL_HCD_GET_FLAG(hhcd, USB_OTG_GINTSTS_RXFLVL))
+    {
+      USB_MASK_INTERRUPT(hhcd->Instance, USB_OTG_GINTSTS_RXFLVL);
+      HCD_RXQLVL_IRQHandler(hhcd);
+      USB_UNMASK_INTERRUPT(hhcd->Instance, USB_OTG_GINTSTS_RXFLVL);
+    }
+
     /* Handle Host channel Interrupt */
     if (__HAL_HCD_GET_FLAG(hhcd, USB_OTG_GINTSTS_HCINT))
     {
@@ -624,15 +637,6 @@ void HAL_HCD_IRQHandler(HCD_HandleTypeDef *hhcd)
       __HAL_HCD_CLEAR_FLAG(hhcd, USB_OTG_GINTSTS_HCINT);
     }
 
-    /* Handle Rx Queue Level Interrupts */
-    if ((__HAL_HCD_GET_FLAG(hhcd, USB_OTG_GINTSTS_RXFLVL)) != 0U)
-    {
-      USB_MASK_INTERRUPT(hhcd->Instance, USB_OTG_GINTSTS_RXFLVL);
-
-      HCD_RXQLVL_IRQHandler(hhcd);
-
-      USB_UNMASK_INTERRUPT(hhcd->Instance, USB_OTG_GINTSTS_RXFLVL);
-    }
   }
 }
 

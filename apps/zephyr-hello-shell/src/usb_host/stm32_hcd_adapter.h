@@ -13,6 +13,8 @@ int stm32_hcd_adapter_id_pin_level(void);
 int stm32_hcd_adapter_id_status(void);
 uint32_t stm32_hcd_adapter_port_status(void);
 void stm32_hcd_adapter_debug_channels(void);
+/* True while the host channel is enabled (HCCHAR.CHENA). */
+bool stm32_hcd_adapter_channel_active(uint8_t pipe);
 int stm32_hcd_adapter_raw_mouse_in(uint8_t active_pipe, uint8_t address,
 				    uint8_t speed, uint8_t endpoint,
 				    uint16_t packet_size, uint8_t interval_ms,

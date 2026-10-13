@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "stm32_hcd_adapter.h"
+#include "usb_audio_capture.h"
 #include "usb_boot_mouse.h"
+#include "usb_class_select.h"
 #include "usb_gpio_capture.h"
 #include "../board_io.h"
 
@@ -15,6 +17,7 @@
 #include "usbh_core.h"
 
 extern USBH_ClassTypeDef usb_boot_mouse_class;
+extern USBH_ClassTypeDef usb_audio_capture_class;
 
 #define USB_HOST_POLL_THREAD_STACK_SIZE 2048
 #define USB_HOST_POLL_THREAD_PRIORITY 10
@@ -24,6 +27,7 @@ K_THREAD_STACK_DEFINE(usb_host_poll_stack, USB_HOST_POLL_THREAD_STACK_SIZE);
 static struct k_thread usb_host_poll_thread;
 static atomic_t usb_host_poll_paused = ATOMIC_INIT(0);
 static atomic_t usb_host_poll_busy = ATOMIC_INIT(0);
+static atomic_t usb_host_config_ready = ATOMIC_INIT(0);
 static USBH_HandleTypeDef usb_host;
 static int usb_host_init_result = -EAGAIN;
 
@@ -126,6 +130,12 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 	ARG_UNUSED(arg3);
 
 	while (true) {
+		/*
+		 * Mark busy before sampling the pause flag so a shell command
+		 * that sets paused and then sees busy == 0 knows this thread
+		 * will not touch usb_host until it is resumed.
+		 */
+		atomic_set(&usb_host_poll_busy, 1);
 		bool running = !atomic_get(&usb_host_poll_paused);
 
 		if (running) {
@@ -144,12 +154,18 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 			 */
 			stm32_hcd_adapter_poll_service();
 			(void)USBH_Process(&usb_host);
+			if (usb_host.gState == HOST_CHECK_CLASS) {
+				atomic_set(&usb_host_config_ready, 1);
+			} else if (usb_host.gState <= HOST_ENUMERATION) {
+				atomic_set(&usb_host_config_ready, 0);
+			}
 			if (usb_host.gState == HOST_CHECK_CLASS &&
 			    usb_host.ClassNumber == 0U) {
 				printf("ST USBH: enumeration complete; no class driver registered\n");
 				usb_host.gState = HOST_ABORT_STATE;
 			}
 		}
+		atomic_set(&usb_host_poll_busy, 0);
 		/*
 		 * The mouse interrupt-IN transfer needs continuous fast host
 		 * processing: a 1 ms class sleep causes TXERR on this board.
@@ -168,6 +184,28 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 	}
 }
 
+/*
+ * Overrides the core's default class-code match: start a class only for
+ * the function selected from the full raw configuration descriptor, so
+ * composite devices are not judged by their first interface.
+ */
+uint8_t USBH_ClassMatches(USBH_HandleTypeDef *phost, USBH_ClassTypeDef *pclass)
+{
+	struct usb_function_selection sel;
+
+	if (usb_function_select(phost->device.CfgDesc_Raw,
+				sizeof(phost->device.CfgDesc_Raw), &sel) != 0) {
+		return 0U;
+	}
+	if (sel.kind == USB_FUNCTION_AUDIO_IN) {
+		return pclass == &usb_audio_capture_class ? 1U : 0U;
+	}
+	if (sel.kind == USB_FUNCTION_BOOT_MOUSE) {
+		return pclass == &usb_boot_mouse_class ? 1U : 0U;
+	}
+	return 0U;
+}
+
 int board_usb_host_start(void)
 {
 	if (USBH_Init(&usb_host, usb_host_user_process, 0U) != USBH_OK ||
@@ -175,7 +213,8 @@ int board_usb_host_start(void)
 		usb_host_init_result = -EIO;
 		return usb_host_init_result;
 	}
-	if (USBH_RegisterClass(&usb_host, &usb_boot_mouse_class) != USBH_OK) {
+	if (USBH_RegisterClass(&usb_host, &usb_boot_mouse_class) != USBH_OK ||
+	    USBH_RegisterClass(&usb_host, &usb_audio_capture_class) != USBH_OK) {
 		usb_host_init_result = -EIO;
 		return usb_host_init_result;
 	}
@@ -191,6 +230,20 @@ int board_usb_host_start(void)
 	k_thread_name_set(tid, "stm32_usbh");
 	usb_host_init_result = 0;
 	return 0;
+}
+
+static void print_audio_snapshot(const struct shell *shell)
+{
+	struct usb_audio_snapshot snap;
+
+	usb_audio_snapshot_get(&snap);
+	shell_print(shell, "audio: connected=%u ready=%u session=%u rate=%u ch=%u "
+		    "bits=%u level=%u packets=%u drops=%u errors=%u missed=%u "
+		    "reason=%s",
+		    snap.connected, snap.ready, snap.session, snap.sample_rate_hz,
+		    snap.channels, snap.bits_per_sample, snap.level, snap.packets,
+		    snap.drops, snap.errors, snap.missed,
+		    snap.reason != NULL ? snap.reason : "-");
 }
 
 static int cmd_usbhost_status(const struct shell *shell, size_t argc, char **argv)
@@ -234,6 +287,7 @@ static int cmd_usbhost_status(const struct shell *shell, size_t argc, char **arg
 		shell_print(shell, "mouse: reports=%u buttons=%u dx=%d dy=%d wheel=%d",
 			    count, report.buttons, report.x, report.y, report.wheel);
 	}
+	print_audio_snapshot(shell);
 	return 0;
 }
 
@@ -262,6 +316,90 @@ static int cmd_usbhost_descriptor(const struct shell *shell, size_t argc,
 		    usb_host.device.DevDesc.bDeviceClass);
 	shell_print(shell, "usb_version:  0x%04x",
 		    usb_host.device.DevDesc.bcdUSB);
+	return 0;
+}
+
+static int usb_host_poll_quiesce(bool *was_paused)
+{
+	*was_paused = atomic_set(&usb_host_poll_paused, 1) != 0;
+	for (int i = 0; i < 100 && atomic_get(&usb_host_poll_busy); i++) {
+		k_msleep(1);
+	}
+	if (atomic_get(&usb_host_poll_busy)) {
+		if (!*was_paused) {
+			atomic_set(&usb_host_poll_paused, 0);
+		}
+		return -EBUSY;
+	}
+	return 0;
+}
+
+static int cmd_usbhost_config(const struct shell *shell, size_t argc,
+			      char **argv)
+{
+	static uint8_t raw[sizeof(usb_host.device.CfgDesc_Raw)];
+	HOST_StateTypeDef state;
+	uint16_t total_len;
+	bool ready;
+	bool was_paused;
+	int ret;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (usb_host_init_result != 0) {
+		shell_error(shell, "usb host init failed: %d", usb_host_init_result);
+		return -ENODEV;
+	}
+
+	ret = usb_host_poll_quiesce(&was_paused);
+	if (ret != 0) {
+		shell_error(shell, "usb host poller busy");
+		return ret;
+	}
+
+	state = usb_host.gState;
+	ready = atomic_get(&usb_host_config_ready) != 0;
+	total_len = usb_host.device.CfgDesc.wTotalLength;
+	if (ready && state >= HOST_CHECK_CLASS && total_len >= USB_CONFIGURATION_DESC_SIZE &&
+	    total_len <= sizeof(raw)) {
+		memcpy(raw, usb_host.device.CfgDesc_Raw, total_len);
+	} else {
+		ready = false;
+	}
+
+	if (!was_paused) {
+		atomic_set(&usb_host_poll_paused, 0);
+	}
+
+	if (!ready) {
+		shell_error(shell, "configuration descriptor not available "
+			    "(state=%s wTotalLength=%u)",
+			    host_state_name(state), total_len);
+		return -ENODEV;
+	}
+
+	if (raw[0] < USB_CONFIGURATION_DESC_SIZE ||
+	    raw[1] != USB_DESC_TYPE_CONFIGURATION ||
+	    (uint16_t)(raw[2] | (raw[3] << 8)) != total_len) {
+		shell_error(shell, "invalid configuration descriptor header "
+			    "(bLength=%u type=%u wTotalLength=%u)",
+			    raw[0], raw[1], total_len);
+		return -EINVAL;
+	}
+
+	shell_print(shell, "wTotalLength: %u", total_len);
+	for (uint16_t off = 0U; off < total_len; off += 16U) {
+		char line[16 * 3 + 1];
+		size_t pos = 0U;
+		uint16_t end = MIN(off + 16U, total_len);
+
+		for (uint16_t i = off; i < end; i++) {
+			pos += snprintf(&line[pos], sizeof(line) - pos, "%s%02x",
+					i == off ? "" : " ", raw[i]);
+		}
+		shell_print(shell, "%04x: %s", off, line);
+	}
 	return 0;
 }
 
@@ -312,6 +450,79 @@ static int cmd_usbhost_rawin(const struct shell *shell, size_t argc, char **argv
 					      endpoint->bEndpointAddress,
 					      endpoint->wMaxPacketSize,
 					      endpoint->bInterval, bulk_schedule);
+}
+
+static int cmd_usbhost_audio(const struct shell *shell, size_t argc, char **argv)
+{
+	static uint8_t pcm[1920] __aligned(4);
+	struct usb_audio_snapshot snap;
+	uint32_t ms;
+	uint64_t bytes = 0U;
+	uint32_t peak = 0U;
+	uint32_t nonzero = 0U;
+
+	if (argc == 1U) {
+		print_audio_snapshot(shell);
+		return 0;
+	}
+	if (argc != 3U || strcmp(argv[1], "read") != 0) {
+		shell_error(shell, "usage: usbhost audio [read <ms>]");
+		return -EINVAL;
+	}
+	ms = (uint32_t)strtoul(argv[2], NULL, 10);
+	if (ms == 0U || ms > 60000U) {
+		shell_error(shell, "ms must be 1..60000");
+		return -EINVAL;
+	}
+	usb_audio_snapshot_get(&snap);
+	if (!snap.ready) {
+		print_audio_snapshot(shell);
+		shell_error(shell, "audio capture not ready");
+		return -ENODEV;
+	}
+
+	uint32_t session = snap.session;
+	int64_t end = k_uptime_get() + ms;
+
+	/* Discard backlog so the window measures live capture. */
+	while (usb_audio_read(session, pcm, sizeof(pcm)) != 0U) {
+	}
+	int64_t start = k_uptime_get();
+
+	while (k_uptime_get() < end) {
+		size_t n = usb_audio_read(session, pcm, sizeof(pcm));
+
+		if (n == 0U) {
+			k_msleep(5);
+			continue;
+		}
+		bytes += n;
+		if (snap.bits_per_sample == 16U) {
+			for (size_t i = 0U; i + 1U < n; i += 2U) {
+				int16_t v = (int16_t)(pcm[i] | (pcm[i + 1U] << 8));
+				uint32_t mag = v < 0 ? (uint32_t)(-(int32_t)v) : (uint32_t)v;
+
+				if (mag != 0U) {
+					nonzero++;
+				}
+				if (mag > peak) {
+					peak = mag;
+				}
+			}
+		}
+	}
+
+	uint32_t elapsed = (uint32_t)(k_uptime_get() - start);
+	uint32_t frame = snap.channels * (snap.bits_per_sample / 8U);
+
+	shell_print(shell, "read: session=%u ms=%u bytes=%llu frames=%llu "
+		    "expected_frames=%llu peak=%u nonzero_samples=%u",
+		    session, elapsed, (unsigned long long)bytes,
+		    (unsigned long long)(bytes / frame),
+		    (unsigned long long)snap.sample_rate_hz * elapsed / 1000U,
+		    peak, nonzero);
+	print_audio_snapshot(shell);
+	return 0;
 }
 
 static void print_capture_result(const struct shell *shell)
@@ -587,6 +798,11 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(status, NULL, "Show ST USB host state", cmd_usbhost_status),
 	SHELL_CMD(descriptor, NULL, "Show enumerated device descriptor",
 		  cmd_usbhost_descriptor),
+	SHELL_CMD(config, NULL, "Dump raw configuration descriptor",
+		  cmd_usbhost_config),
+	SHELL_CMD(audio, NULL,
+		  "Show microphone capture state (usbhost audio [read <ms>])",
+		  cmd_usbhost_audio),
 	SHELL_CMD(capture, NULL,
 		  "Tight-loop capture of D+/D- GPIO state (usbhost capture [n])",
 		  cmd_usbhost_capture),

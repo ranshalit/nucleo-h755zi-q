@@ -725,6 +725,58 @@ Re-run this command (and rebuild/reflash) to change the clip. The script
 fails with a clear error if the encoded frame data would exceed the
 `--flash-budget-bytes` limit.
 
+### USB microphone (listen in Edge)
+
+A USB headset microphone on USER USB **CN13** can be heard live in the browser.
+Tested with **Logitech H570e Stereo** (`046d:0a56`): UAC1, full-speed, mic on
+IF1 alt1, isochronous EP `0x81`, captured as 48 kHz / 2 ch / 16-bit
+(~192 KB/s). The firmware parses the device's real configuration descriptor
+and picks the best supported mic format; other UAC1 mics with 16/24-bit PCM
+should work but are untested.
+
+Use:
+
+1. Plug the headset into CN13 (USB mouse and headset are swappable at runtime;
+   only one device at a time, no hub support yet).
+2. Open `http://192.168.55.2/` in Edge. The **USB microphone (CN13)** card
+   shows format, input level, drops/errors.
+3. Click **Start listening**. Audio plays through the computer's selected
+   output (not the headset speaker). Measured delay is about 0.5–1 s.
+
+Endpoints:
+
+- `GET http://192.168.55.2/api/v1/mic` — status JSON, e.g.
+  `{"attached":true,"ready":true,"session":1,"format":{"sample_rate_hz":48000,"channels":2,"bits_per_sample":16},"level":4,"packets":16986,"drops":0,"errors":0,"missed":0,"reason":"streaming"}`.
+  `drops` counts PCM overwritten in the 250 ms board ring while nobody listens.
+- `GET http://192.168.55.2:8082/` — raw stream: 16-byte header
+  (`"MIC1"`, rate u32 LE, channels u16 LE, bits u16 LE, session u32 LE)
+  followed by signed little-endian interleaved PCM. One listener at a time:
+  `409` if busy, `503` if no supported mic is attached.
+
+Quick check without a browser:
+
+```bash
+curl -s --max-time 2 http://192.168.55.2:8082/ -o mic.bin; head -c 4 mic.bin  # MIC1
+```
+
+UART shell diagnostics: `usbhost audio` (live counters), `usbhost config`
+(raw configuration descriptor dump).
+
+Build note: correct isochronous capture needs an STM32 HCD HAL fix (drain
+the RX FIFO before channel-halt callbacks). The app's CMake applies
+`patches/stm32h7-hcd-rx-before-hcint.patch` to a private copy of
+`stm32h7xx_hal_hcd.c` in the build directory, leaving the shared Zephyr HAL
+untouched; configuration fails if the patch no longer applies. See
+`patches/README.md`.
+
+Troubleshooting:
+
+- Card stays disconnected after replug: run `usbhost vbuscycle` on the UART
+  shell (rare enumeration stall, also present before the mic work).
+- `busy` in the card: another tab/player holds port 8082; stop it first.
+- Not supported: headset speaker output, recording, browser-to-board audio,
+  USB hubs.
+
 ## STM32CubeIDE reference build
 
 The verified STM32Cube reference baseline is vendored under:

@@ -19,6 +19,7 @@
 #include "usbh_core.h"
 #include "usbh_ioreq.h"
 #include "usb_gpio_capture.h"
+#include "usb_audio_capture.h"
 
 #define STM32_HCD_IRQ 101 /* OTG_FS_IRQn, RM0468 Table 135 */
 #define STM32_HCD_IRQ_PRI 5
@@ -85,6 +86,14 @@ void HAL_HCD_SOF_Callback(HCD_HandleTypeDef *hhcd)
 {
 	if (hhcd->pData != NULL) {
 		USBH_LL_IncTimer(hhcd->pData);
+	}
+}
+
+void HAL_HCD_HC_NotifyURBChange_Callback(HCD_HandleTypeDef *hhcd, uint8_t chnum,
+					 HCD_URBStateTypeDef urb_state)
+{
+	if (hhcd->pData != NULL && urb_state == URB_DONE) {
+		usb_audio_capture_urb_done(hhcd->pData, chnum);
 	}
 }
 
@@ -501,6 +510,13 @@ void stm32_hcd_adapter_debug_channels(void)
 		}
 	}
 	printf("\n");
+}
+
+bool stm32_hcd_adapter_channel_active(uint8_t pipe)
+{
+	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
+
+	return (USBx_HC(pipe)->HCCHAR & USB_OTG_HCCHAR_CHENA) != 0U;
 }
 
 USBH_URBStateTypeDef USBH_LL_GetURBState(USBH_HandleTypeDef *phost,
