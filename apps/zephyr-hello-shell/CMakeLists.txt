@@ -58,6 +58,10 @@ endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_hello_shell)
 
+if(extra_conf_file)
+  include(cmake/patch_stm32_hcd.cmake)
+endif()
+
 if(DEFINED ENV{SOURCE_DATE_EPOCH} AND
    NOT "$ENV{SOURCE_DATE_EPOCH}" MATCHES "^[0-9]+$")
   message(FATAL_ERROR "SOURCE_DATE_EPOCH must be a nonnegative integer")
