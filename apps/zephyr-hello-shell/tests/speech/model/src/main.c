@@ -5,6 +5,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/byteorder.h>
 #include "speech_model.h"
+#include "speech_service.h"
 static const uint8_t yes_audio[] = {
 #include <yes_1000ms.inc>
 };
@@ -63,6 +64,47 @@ static void classify(const uint8_t *wav, size_t n, int expected)
 	assert(winner == expected);
 }
 
+static void test_service(void)
+{
+	struct speech_snapshot snapshot;
+	struct usb_audio_snapshot capture = {
+		.connected = true, .ready = true, .session = 1,
+		.sample_rate_hz = 48000, .channels = 2, .bits_per_sample = 16
+	};
+	assert(speech_service_start() == 0);
+	k_msleep(100);
+	speech_capture_changed(&capture);
+	k_msleep(30);
+	speech_snapshot_get(&snapshot);
+	assert(snapshot.state == SPEECH_WARMING_UP && !snapshot.prediction_valid);
+	uint8_t pcm[192] = {0};
+	for (int i = 0; i < 1200; ++i) {
+		speech_capture_push(&capture, pcm, sizeof(pcm));
+		k_msleep(1);
+	}
+	k_msleep(100);
+	speech_snapshot_get(&snapshot);
+	assert(snapshot.state == SPEECH_RUNNING && snapshot.prediction_valid);
+	assert(snapshot.windows > 0 && snapshot.drops == 0);
+	++capture.missed;
+	speech_capture_changed(&capture);
+	speech_snapshot_get(&snapshot);
+	assert(!snapshot.prediction_valid && !snapshot.event_valid && snapshot.gaps == 1);
+	capture.ready = false;
+	capture.connected = false;
+	++capture.session;
+	speech_capture_changed(&capture);
+	speech_snapshot_get(&snapshot);
+	assert(snapshot.state == SPEECH_UNAVAILABLE && !snapshot.prediction_valid);
+	capture.ready = true;
+	capture.connected = true;
+	capture.sample_rate_hz = 44100;
+	speech_capture_changed(&capture);
+	speech_snapshot_get(&snapshot);
+	assert(snapshot.state == SPEECH_UNSUPPORTED_FORMAT);
+	puts("PASS: worker warmup/inference/gap/disconnect/unsupported transitions");
+}
+
 int main(void)
 {
 	static const int8_t yes_expected[40] = {
@@ -92,5 +134,6 @@ int main(void)
 	classify(yes_audio, sizeof(yes_audio), 2);
 	printf("PASS: model fixtures; arenas frontend=%zu classifier=%zu\n",
 	       speech_model_arena_used(true), speech_model_arena_used(false));
+	test_service();
 	return 0;
 }

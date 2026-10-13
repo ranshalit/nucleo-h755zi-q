@@ -10,6 +10,7 @@
 #include "usb_audio_desc.h"
 #include "usb_class_select.h"
 #include "stm32_hcd_adapter.h"
+#include "speech_service.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -60,6 +61,13 @@ static struct usb_audio_ring audio_ring;
 static struct k_spinlock audio_lock;
 static bool audio_ring_initialized;
 
+static void speech_notify_capture(void)
+{
+	struct usb_audio_snapshot snapshot;
+	usb_audio_snapshot_get(&snapshot);
+	speech_capture_changed(&snapshot);
+}
+
 static void ring_lazy_init(void)
 {
 	if (!audio_ring_initialized) {
@@ -97,6 +105,7 @@ static void audio_set_ready(bool ready, const char *reason)
 
 	usb_audio_ring_set_ready(&audio_ring, ready, reason);
 	k_spin_unlock(&audio_lock, key);
+	speech_notify_capture();
 }
 
 static USBH_StatusTypeDef audio_init_failed(USBH_HandleTypeDef *host,
@@ -111,6 +120,7 @@ static USBH_StatusTypeDef audio_init_failed(USBH_HandleTypeDef *host,
 
 	usb_audio_ring_detach(&audio_ring, reason);
 	k_spin_unlock(&audio_lock, key);
+	speech_notify_capture();
 	return USBH_FAIL;
 }
 
@@ -215,6 +225,7 @@ static USBH_StatusTypeDef audio_deinit(USBH_HandleTypeDef *host)
 	ring_lazy_init();
 	usb_audio_ring_detach(&audio_ring, "disconnected");
 	k_spin_unlock(&audio_lock, key);
+	speech_notify_capture();
 	return USBH_OK;
 }
 
@@ -353,6 +364,7 @@ static void audio_complete(USBH_HandleTypeDef *host)
 		/* The ring already counted the rejected packet. */
 		audio_consecutive_error();
 	} else {
+		speech_capture_push(&after, audio.packet, length);
 		audio.consecutive_errors = 0U;
 	}
 }

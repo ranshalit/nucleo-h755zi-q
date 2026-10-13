@@ -5,6 +5,16 @@ get_filename_component(SPEECH_APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 target_sources(app PRIVATE "${SPEECH_APP_ROOT}/src/speech/speech_model.cc")
 set(NO_THREADSAFE_STATICS $<TARGET_PROPERTY:compiler-cpp,no_threadsafe_statics>)
 zephyr_compile_options($<$<COMPILE_LANGUAGE:CXX>:${NO_THREADSAFE_STATICS}>)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Preserve CMSIS-NN speed optimizations; shrink the interpreter/frontend glue.
+  get_target_property(tflm_sources modules__tflite-micro SOURCES)
+  foreach(source IN LISTS tflm_sources)
+    set_property(SOURCE "${source}" TARGET_DIRECTORY modules__tflite-micro
+      APPEND PROPERTY COMPILE_OPTIONS -Os)
+  endforeach()
+  set_source_files_properties("${SPEECH_APP_ROOT}/src/speech/speech_model.cc"
+    PROPERTIES COMPILE_OPTIONS -Os)
+endif()
 foreach(model micro_speech_quantized audio_preprocessor_int8)
   generate_inc_file_for_target(app
     "${SPEECH_TFLM_DIR}/tensorflow/lite/micro/examples/micro_speech/models/${model}.tflite"

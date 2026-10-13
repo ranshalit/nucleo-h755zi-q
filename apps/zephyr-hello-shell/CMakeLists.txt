@@ -64,6 +64,7 @@ project(zephyr_hello_shell)
 
 if(CONFIG_APP_SPEECH_AI)
   include(cmake/speech_model.cmake)
+  target_sources(app PRIVATE src/speech/speech_audio.c src/speech/speech_decision.c)
 endif()
 if(extra_conf_file)
   include(cmake/patch_stm32_hcd.cmake)
@@ -89,12 +90,14 @@ target_sources(app PRIVATE
   src/camera_stream.c
   src/audio_wire.c
   src/audio_stream.c
+  src/speech/speech_service.c
   src/usb_host/usb_boot_mouse_report.c
   ${board_sources}
 )
 
 target_include_directories(app PRIVATE
   src/usb_host
+  src/speech
   ${board_include_dirs}
 )
 
