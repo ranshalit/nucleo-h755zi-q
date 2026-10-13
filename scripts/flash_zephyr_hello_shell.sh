@@ -210,10 +210,19 @@ prepare_toolchain() {
 
 build_app() {
   prepare_toolchain
+  local toolchain_args=()
+  # Cross-compile does not detect the standalone SDK's full C/C++ libc.
+  if [[ "${ZEPHYR_TOOLCHAIN_VARIANT:-}" == "cross-compile" ]]; then
+    local picolibc_specs
+    picolibc_specs="$("${CROSS_COMPILE}gcc" -print-file-name=picolibc.specs)"
+    if [[ -f "${picolibc_specs}" ]]; then
+      toolchain_args+=("-DTOOLCHAIN_HAS_PICOLIBC=ON")
+    fi
+  fi
   log "building ${APP_DIR} for ${BOARD}"
   (
     cd "${ZEPHYR_BASE}"
-    "${WEST_BIN}" build -p always -b "${BOARD}" "${APP_DIR}" -d "${BUILD_DIR}"
+    "${WEST_BIN}" build -p always -b "${BOARD}" "${APP_DIR}" -d "${BUILD_DIR}" -- "${toolchain_args[@]}"
   )
 }
 

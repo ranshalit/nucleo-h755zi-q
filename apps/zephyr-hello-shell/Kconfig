@@ -1,5 +1,11 @@
 source "Kconfig.zephyr"
 
+config APP_SPEECH_AI
+	bool "On-board English yes/no recognition"
+	depends on APP_USB_HOST_HCD
+	select CPP
+	select TENSORFLOW_LITE_MICRO
+
 config APP_HTTP_PORT
 	int "Application HTTP server port"
 	range 1 65535

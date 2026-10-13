@@ -229,3 +229,6 @@
 [submodule "vendor/zephyrproject/zephyr"]
 	path = vendor/zephyrproject/zephyr
 	url = https://github.com/zephyrproject-rtos/zephyr
+[submodule "apps/zephyr-hello-shell/third_party/tflite-micro"]
+	path = apps/zephyr-hello-shell/third_party/tflite-micro
+	url = https://github.com/zephyrproject-rtos/tflite-micro
