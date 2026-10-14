@@ -17,6 +17,12 @@ BUILD_ASSERT(SPEECH_MODEL_LABELS == SPEECH_LABEL_COUNT, "model/label mismatch");
 static struct speech_audio_queue queue;
 static struct speech_decimator decimator;
 static struct speech_decision decision;
+#ifdef CONFIG_APP_USB_HOST_EVENT_WORKER
+/* The blocking USB worker (priority 10) must drain notifications during inference. */
+#define SPEECH_THREAD_PRIORITY 11
+#else
+#define SPEECH_THREAD_PRIORITY 8
+#endif
 static struct usb_audio_snapshot input;
 static bool started;
 static bool failed;
@@ -217,7 +223,7 @@ int speech_service_start(void)
 	status.reason = "initializing English keyword model";
 	k_spin_unlock(&lock, key);
 	k_tid_t tid = k_thread_create(&worker, worker_stack, K_THREAD_STACK_SIZEOF(worker_stack),
-				     run_worker, NULL, NULL, NULL, 8, 0, K_NO_WAIT);
+				     run_worker, NULL, NULL, NULL, SPEECH_THREAD_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(tid, "speech_ai");
 	return 0;
 }

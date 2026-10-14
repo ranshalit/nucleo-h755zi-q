@@ -43,6 +43,16 @@ int main(void)
 		assert(!speech_decision_update(&decision, scores, 100, &event));
 		assert(speech_decision_update(&decision, scores, 200, &event));
 		assert(event == directions[i]);
+		speech_decision_reset(&decision);
+		speech_decision_set_threshold(&decision, 950);
+		for (int64_t t = 0; t < 500; t += 100) {
+			assert(!speech_decision_update(&decision, scores, t, &event));
+		}
+		speech_decision_set_threshold(&decision, 900);
+		assert(!speech_decision_update(&decision, scores, 500, &event));
+		assert(!speech_decision_update(&decision, scores, 600, &event));
+		assert(speech_decision_update(&decision, scores, 700, &event));
+		assert(event == directions[i]);
 	}
 	uint16_t weak_up[SPEECH_LABEL_COUNT] = {0, 300, 0, 0, 700};
 	speech_decision_reset(&decision);

@@ -1,7 +1,7 @@
 source "Kconfig.zephyr"
 
 config APP_SPEECH_AI
-	bool "On-board English yes/no recognition"
+	bool "On-board English keyword recognition"
 	depends on APP_USB_HOST_HCD
 	select CPP
 	select TENSORFLOW_LITE_MICRO

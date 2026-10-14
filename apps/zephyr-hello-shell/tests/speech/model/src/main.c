@@ -108,10 +108,13 @@ static void test_service(void)
 	};
 	assert(speech_service_start() == 0);
 	k_msleep(100);
+	assert(speech_service_set_threshold(65) == 0);
+	assert(speech_service_set_threshold(49) == -ERANGE);
 	speech_capture_changed(&capture);
 	k_msleep(30);
 	speech_snapshot_get(&snapshot);
 	assert(snapshot.state == SPEECH_WARMING_UP && !snapshot.prediction_valid);
+	assert(snapshot.threshold_percent == 65);
 	uint8_t pcm[192] = {0};
 	for (int i = 0; i < 1200; ++i) {
 		speech_capture_push(&capture, pcm, sizeof(pcm));
@@ -125,6 +128,7 @@ static void test_service(void)
 	speech_capture_changed(&capture);
 	speech_snapshot_get(&snapshot);
 	assert(!snapshot.prediction_valid && !snapshot.event_valid && snapshot.gaps == 1);
+	assert(snapshot.threshold_percent == 65);
 	capture.ready = false;
 	capture.connected = false;
 	++capture.session;
@@ -137,6 +141,8 @@ static void test_service(void)
 	speech_capture_changed(&capture);
 	speech_snapshot_get(&snapshot);
 	assert(snapshot.state == SPEECH_UNSUPPORTED_FORMAT);
+	assert(snapshot.threshold_percent == 65);
+	assert(speech_service_set_threshold(80) == 0);
 	puts("PASS: worker warmup/inference/gap/disconnect/unsupported transitions");
 }
 
