@@ -790,7 +790,7 @@ Troubleshooting:
 ### Speech AI (English keywords, on the board)
 
 The **Speech AI** dashboard card recognizes English **yes, no, up, down, left,
-right** from the Logitech H570e microphone on CN13. TensorFlow Lite Micro runs
+right, stop** from the Logitech H570e microphone on CN13. TensorFlow Lite Micro runs
 the trained int8 `tiny_conv` model (`models/speech_keywords.tflite`) inside a
 dedicated M7 Zephyr thread. No training during builds, PC inference, cloud
 service, or Internet connection is needed.
@@ -808,6 +808,10 @@ through 100%. A cutoff change clears any partial confirmation streak, does
 not change the displayed raw model score, and resets to 80% after a board
 reboot. All LEDs keep their existing behavior. **Start listening** remains
 optional and works independently.
+
+The Speech AI card shows a voice joystick: up/down/left/right latch the knob,
+stop centers it, yes/no press the matching button for 0.7 s. Joystick state
+lives in the browser only.
 
 Capture remains 48 kHz stereo 16-bit. A separate bounded queue feeds the
 recognizer without consuming the browser playback ring. The left channel
@@ -846,8 +850,9 @@ builds with this standalone SDK, pass `-DTOOLCHAIN_HAS_PICOLIBC=ON` and
 Full Zephyr SDK installations using the `zephyr` variant handle this through
 their own toolchain configuration.
 
-The default is the first extended-word model (v1), not the later room-noise
-experiment. Held-out int8 classification accuracy was 82.55%; this is not a
+The default is the seven-keyword direction + stop model (v3), not the earlier
+v1 or room-noise experiments. Held-out int8 classification accuracy was 80.22%
+(N=3508); this is not a
 continuous-stream false-trigger measurement. Whispered "shhhh", mic contact,
 and other noises can produce accepted commands. Raising the threshold trades
 recall for rejection and is not an established fix. See
@@ -863,7 +868,7 @@ an M4 image there while this model layout is in use.
 Retraining is optional, separate from firmware builds:
 
 ```bash
-SPEECH_TRAIN_DIR="$HOME/kws-train-v1-clean" scripts/train_speech_keywords.sh
+SPEECH_TRAIN_DIR="$HOME/kws-train-stop" scripts/train_speech_keywords.sh
 ```
 
 The script installs TensorFlow 2.15.1 in a separate venv, downloads Speech
@@ -932,7 +937,7 @@ NODE_PATH="$HOME/.copilot/skills/browser/node_modules" \
 ```
 
 `--model` builds a separate native_sim fixture application, checks exact
-upstream frontend features and all six keyword fixtures plus noise inference.
+upstream frontend features and all seven keyword fixtures plus noise inference.
 Near-digital-zero silence must not reach the default keyword threshold; it
 need not win the silence class. The suite also exercises
 worker warmup, gap reset, disconnect, and unsupported-format states.

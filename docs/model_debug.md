@@ -5,8 +5,8 @@
 The experimental direction-keyword model is not ready for integration.
 Retraining with room noise reduced false events on two captured reproductions,
 but did not reliably reject whispered "shhhh" or microphone handling.
-Keep direction support with v1 as the default model. Preserve v2 locally for
-research rather than make it the default. Neither model reliably rejects these
+Direction + stop v3 (seven keywords, nine classes) is now the default model.
+v1 and v2 are kept for research rather than as the default. Neither model reliably rejects these
 noises. The user reversed the discard request and approved validating and merging
 v1 together with current master and the runtime threshold controls.
 
@@ -20,9 +20,11 @@ TensorFlow Lite Micro (TFLM) is the inference runtime, not the model
 architecture. The experiment uses TensorFlow's `tiny_conv` architecture,
 trained on Speech Commands v0.02 and exported as an int8 TFLite model.
 
-Both experimental models have eight output classes, in this order:
+Models v1 and v2 have eight output classes, in this order:
 `silence, unknown, yes, no, up, down, left, right`. There are six keywords,
-not eight. Each classifier is 35,000 bytes. Input quantization is
+not eight. Each v1/v2 classifier is 35,000 bytes. Direction + stop v3 adds
+`stop`: nine output classes (`silence, unknown, yes, no, up, down, left, right,
+stop`), seven keywords, and 39,000 bytes. Input quantization is
 scale `0.10171568393707275`, zero point `-128`, matching the board frontend.
 Operators are `CONV_2D`, `FULLY_CONNECTED`, `RESHAPE`, and `SOFTMAX`.
 
@@ -31,6 +33,10 @@ Operators are `CONV_2D`, `FULLY_CONNECTED`, `RESHAPE`, and `SOFTMAX`.
 | Original | Upstream TFLM `micro_speech` yes/no model | Not remeasured in this investigation |
 | Direction v1 | Six keywords, stock background noise | Float 83.0%; int8 82.55% (N=3055) |
 | Room-noise v2 | Same architecture plus recorded room noise | Float 80.5% (N=3326); int8 81.73% (N=3055) |
+| Direction + stop v3 | Seven keywords, stock background noise | Float 80.6%; int8 80.22% (N=3508) |
+
+v3 per-class int8 accuracy: silence 95.9, unknown 46.7, yes 89.3, no 77.5,
+up 79.3, down 78.3, left 78.2, right 85.6, stop 87.1. v3 is the default model.
 
 The float v2 result uses a different silence/unknown class mix, so it is not
 directly comparable to v1. Overall classification accuracy is also not a
@@ -160,7 +166,8 @@ The original model is versioned inside the pinned TFLM submodule:
 `apps/zephyr-hello-shell/third_party/tflite-micro/tensorflow/lite/micro/examples/micro_speech/models/micro_speech_quantized.tflite`.
 The submodule revision used was `8d404de73acf7687831e16d88e86e4f73cfddf8e`.
 
-V1 is now committed as `apps/zephyr-hello-shell/models/speech_keywords.tflite`.
+V1 was first committed as `apps/zephyr-hello-shell/models/speech_keywords.tflite`;
+v3 (current default, 39,000 bytes) now occupies that path.
 V2 and training checkpoints remain local backups, **not tracked in git**:
 
 - `/home/ranshal/kws-train/speech_keywords_v1.tflite`

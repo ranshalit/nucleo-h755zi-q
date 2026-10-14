@@ -17,7 +17,7 @@ reference but is no longer the application default.
 | `audio_preprocessor_int8.tflite` | 8772 | `790087b76697027f7026a75a92449e189d0beb99` |
 
 Input: 16 kHz signed 16-bit mono; 480-sample frames advancing by 320 samples;
-49 x 40 int8 features. Output order: silence, unknown, yes, no, up, down, left, right.
+49 x 40 int8 features. Output order: silence, unknown, yes, no, up, down, left, right, stop.
 The exact upstream preprocessing model is used, not arbitrary MFCC features.
 Scores are quantized model outputs, not measured accuracy.
 
@@ -27,17 +27,19 @@ and source filenames are in `tests/speech/model/fixtures/README.md`.
 Host arena measurements: frontend 10576 bytes; classifier 9696 bytes.
 Both arenas reserve 16384 bytes; ARM/CMSIS-NN usage is checked separately.
 
-## Default classifier: direction v1
+## Default classifier: direction + stop v3
 
 - Architecture: TensorFlow r2.15 `speech_commands` `tiny_conv`, trained on
   Google Speech Commands v0.02 (CC BY 4.0 dataset; see
   <https://www.tensorflow.org/datasets/catalog/speech_commands>).
-- Artifact: `models/speech_keywords.tflite`, 35000 bytes.
-- SHA-256: `effa7d8d35e3c2d06f2ac03d6d7bb63e2bb3508312b7278fefab4b6e991b0114`.
-- Recipe: `scripts/train_speech_keywords.sh`; 12000 steps at 0.001 and 3000
-  at 0.0001, 12% silence, 12% unknown, stock background-noise augmentation.
-- Int8 test accuracy: 82.55% (N=3055); silence 96.6%, unknown 53.0%, yes 90.7%,
-  no 81.2%, up 87.5%, down 79.6%, left 80.8%, right 86.4%.
+- Artifact: `models/speech_keywords.tflite`, 39000 bytes, nine output classes
+  (seven keywords: yes, no, up, down, left, right, stop).
+- SHA-256: `ffad11117ba0b581ef1600b422523d59302edaff02085703e16731fd8450fea2`.
+- Recipe: `SPEECH_TRAIN_DIR=~/kws-train-stop scripts/train_speech_keywords.sh`;
+  12000 steps at 0.001 and 3000 at 0.0001, 11% silence, 11% unknown, stock
+  background-noise augmentation.
+- Int8 test accuracy: 80.22% (N=3508); silence 95.9%, unknown 46.7%, yes 89.3%,
+  no 77.5%, up 79.3%, down 78.3%, left 78.2%, right 85.6%, stop 87.1%.
 - Input scale `0.10171568393707275`, zero point `-128`; export checks these
   against the fixed upstream frontend.
 - Operators: `CONV_2D`, `FULLY_CONNECTED`, `RESHAPE`, `SOFTMAX`. Int8-only
