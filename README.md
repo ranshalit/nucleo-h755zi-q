@@ -799,10 +799,14 @@ are not supported.
 Recognition starts automatically with a ready microphone. Open
 `http://192.168.55.2/`, speak near the headset microphone, and watch **Detected**.
 The current model class and model score are raw predictions, not accepted
-commands or measured accuracy. Acceptance requires a winning yes/no score
-of at least 0.8 over three consecutive 100 ms decisions; repeated events
-are suppressed until a non-keyword interval. All LEDs keep their existing
-behavior. **Start listening** remains optional and works independently.
+commands or measured accuracy. By default, acceptance requires a winning
+yes/no score of at least 0.8 over three consecutive 100 ms decisions; repeated
+events are suppressed until a non-keyword interval. Use **Detection threshold**
+on the Speech AI card to change the cutoff immediately to an integer from 50%
+through 100%. A cutoff change clears any partial confirmation streak, does
+not change the displayed raw model score, and resets to 80% after a board
+reboot. All LEDs keep their existing behavior. **Start listening** remains
+optional and works independently.
 
 Capture remains 48 kHz stereo 16-bit. A separate bounded queue feeds the
 recognizer without consuming the browser playback ring. The left channel
@@ -815,8 +819,12 @@ but report unsupported format for speech recognition.
 `GET /api/v1/speech` returns state/reason, nullable current label/model score,
 nullable last accepted event (label, sequence, board uptime), inference and
 processing times, processed-window count, capture session, audio gaps, and
-dropped recognition frames. UART command `speech status` shows the same
-diagnostics. Unplug, input gaps, or queue overflow clear current predictions
+dropped recognition frames, plus the active `threshold_percent`. The dashboard
+sets it with `POST /api/v1/speech/settings` and JSON
+`{"threshold_percent": 80}`; the response returns the active value. Requests
+outside 50–100 or with a non-integer value fail with HTTP 400 and do not alter
+the setting. UART command `speech status` shows the same diagnostics. Unplug,
+input gaps, or queue overflow clear current predictions
 and last event, reset frontend history, and warm up on new contiguous audio.
 The normal native_sim/QEMU application reports speech unavailable; it does
 not pretend to recognize host or simulated microphone audio.

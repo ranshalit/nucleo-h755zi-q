@@ -10,8 +10,12 @@ function asset(name) {
   assert(match);
   return [...match[1].matchAll(/"(?:\\.|[^"\\])*"/g)].map(x => JSON.parse(x[0])).join('');
 }
-let speech = {state: 'unavailable', reason: 'no ready USB microphone', label: null, score: null, last_event: null};
+let speech = {state: 'unavailable', reason: 'no ready USB microphone', label: null, score: null,
+  last_event: null, threshold_percent: 80};
 let failSpeech = false;
+let failThreshold = false;
+let thresholdRequest = null;
+let thresholdRequests = 0;
 let ledRequests = 0;
 const server = http.createServer((req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -21,7 +25,23 @@ const server = http.createServer((req, res) => {
   else {
     res.setHeader('Content-Type', 'application/json');
     if (req.url === '/api/v1/leds') { ledRequests++; }
-    if (req.url === '/api/v1/speech') { res.statusCode = failSpeech ? 503 : 200; res.end(JSON.stringify(speech)); }
+    if (req.url === '/api/v1/speech/settings' && req.method === 'POST') {
+      let body = '';
+      req.setEncoding('utf8');
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        thresholdRequest = JSON.parse(body);
+        thresholdRequests++;
+        if (failThreshold) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({error: 'threshold rejected'}));
+          return;
+        }
+        speech = {...speech, threshold_percent: thresholdRequest.threshold_percent};
+        res.end(JSON.stringify({threshold_percent: speech.threshold_percent}));
+      });
+    }
+    else if (req.url === '/api/v1/speech') { res.statusCode = failSpeech ? 503 : 200; res.end(JSON.stringify(speech)); }
     else if (req.url === '/api/v1/mic') { res.end(JSON.stringify({attached: false, ready: false})); }
     else if (req.url === '/api/v1/mouse') { res.end(JSON.stringify({attached: false})); }
     else { res.end(JSON.stringify({board: {}, network: {}, io: {leds: [], button: {}}})); }
@@ -37,11 +57,13 @@ async function main() {
     const waitText = (id, text) => page.waitForFunction((id, text) =>
       document.getElementById(id)?.textContent === text, {timeout: 5000}, id, text);
     await waitText('speech-state', 'unavailable');
+    await waitText('speech-threshold-active', 'Active threshold: 80%');
     speech = {...speech, state: 'warming-up', reason: 'collecting audio'};
     await waitText('speech-state', 'warming-up');
     speech = {state: 'running', reason: 'recognizing English yes/no/up/down/left/right', label: 'yes', score: .91,
       last_event: {label: 'yes', sequence: 1, uptime_ms: 12000},
-      session: 3, inference_us: 1500, max_processing_us: 2400, windows: 3, gaps: 0, drops: 0};
+      session: 3, inference_us: 1500, max_processing_us: 2400, windows: 3, gaps: 0, drops: 0,
+      threshold_percent: 80};
     await waitText('speech-label', 'yes');
     await waitText('speech-score', 'Model score: 91.0%');
     await waitText('speech-event', 'Detected: yes');
@@ -63,6 +85,35 @@ async function main() {
     await waitText('speech-event', 'Detected: left');
     assert.equal(await page.evaluate(() => window.speechHighlights), 2);
     assert.match(await page.evaluate(() => document.body.textContent), /yes, no, up, down, left, right/);
+    await page.$eval('#speech-threshold-input', input => {
+      input.value = '65';
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    await page.click('#speech-threshold-apply');
+    await waitText('speech-threshold-active', 'Active threshold: 65%');
+    await waitText('speech-threshold-feedback', 'Threshold updated');
+    assert.deepStrictEqual(thresholdRequest, {threshold_percent: 65});
+    failThreshold = true;
+    await page.$eval('#speech-threshold-input', input => {
+      input.value = '70';
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    await page.click('#speech-threshold-apply');
+    await page.waitForFunction(() =>
+      document.getElementById('speech-threshold-feedback')?.textContent.includes('(400)'),
+    {timeout: 5000});
+    assert.equal(await page.$eval('#speech-threshold-active', node => node.textContent),
+      'Active threshold: 65%');
+    assert.equal(await page.$eval('#speech-threshold-input', node => node.value), '70');
+    const requestsBeforeInvalid = thresholdRequests;
+    await page.$eval('#speech-threshold-input', input => {
+      input.value = '49';
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    await page.click('#speech-threshold-apply');
+    await waitText('speech-threshold-feedback', 'Enter a whole number from 50 to 100');
+    assert.equal(thresholdRequests, requestsBeforeInvalid, 'invalid local value was sent');
+    failThreshold = false;
     speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
     await waitText('speech-label', '--');
     await waitText('speech-event', 'No accepted keyword');
@@ -71,7 +122,7 @@ async function main() {
     failSpeech = false;
     await waitText('speech-state', 'unavailable');
     assert.equal(ledRequests, 0, 'speech changed LED state');
-    console.log('PASS: speech card states, events, direction labels, polling failure and unchanged LEDs');
+    console.log('PASS: speech states, direction events, threshold updates/errors and unchanged LEDs');
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));
