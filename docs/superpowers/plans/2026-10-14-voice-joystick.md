@@ -312,24 +312,29 @@ In `tests/web/test_speech_card.cjs`:
     assert.equal(await attr('joy-knob', 'data-dir'), 'right', 'latched direction lost');
 ```
 
-8. Before `assert.equal(ledRequests, 0, ...)` add a page-reload check:
+8. Before `assert.equal(ledRequests, 0, ...)` add a page-reload check (pre-existing `yes` must not press; pre-existing direction must restore):
 
 ```js
     speech = {state: 'running', reason: 'recognizing', label: 'silence', score: .9,
-      last_event: {label: 'down', sequence: 9, uptime_ms: 30000}, session: 3,
+      last_event: {label: 'yes', sequence: 9, uptime_ms: 30000}, session: 3,
       inference_us: 1500, max_processing_us: 2400, threshold_percent: 80};
     const page2 = await browser.newPage();
     await page2.goto(`http://127.0.0.1:${server.address().port}`);
-    await page2.waitForFunction(() => document.getElementById('joy-knob')?.getAttribute('data-dir') === 'down', {timeout: 5000});
-    speech.last_event = {label: 'yes', sequence: 10, uptime_ms: 32000};
-    await page2.waitForFunction(() => document.getElementById('voice-yes')?.getAttribute('data-pressed') === '1', {timeout: 5000});
+    await page2.waitForFunction(() => document.getElementById('voice-pad')?.getAttribute('data-disabled') === '0', {timeout: 5000});
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(await page2.$eval('#voice-yes', n => n.getAttribute('data-pressed')), '0', 'stale yes pressed on load');
     await page2.close();
+    speech.last_event = {label: 'down', sequence: 10, uptime_ms: 32000};
+    const page3 = await browser.newPage();
+    await page3.goto(`http://127.0.0.1:${server.address().port}`);
+    await page3.waitForFunction(() => document.getElementById('joy-knob')?.getAttribute('data-dir') === 'down', {timeout: 5000});
+    speech.last_event = {label: 'no', sequence: 11, uptime_ms: 34000};
+    await page3.waitForFunction(() => document.getElementById('voice-no')?.getAttribute('data-pressed') === '1', {timeout: 5000});
+    await page3.close();
     speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
 ```
 
 and change the final log to `'PASS: speech states, direction events, joystick/buttons, threshold updates/errors and unchanged LEDs'`.
-
-Note the initial-load rule (no YES/NO press for a pre-existing event) is covered by the unit-level logic in Step 3 (`speechFirstPoll`); the reload check proves a pre-existing direction is restored and later events still fire.
 
 - [ ] **Step 2: Run test to verify it fails**
 
