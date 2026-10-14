@@ -1,0 +1,90 @@
+UTC: 2026-10-14T10:22:52.637273+00:00
+Trial: mode=event device=mouse capture_seconds=20.0
+usbhost: after HAL_HCD_Start GAHBCFG=0x00000001 GUSBCFG=0x20001440
+usbhost: VBUS on PD10=0 PA9=1 HPRT=0x00041801
+Camera stream listening on http://192.168.55.2:8081/
+Microphone stream listening on http://192.168.55.2:8082/
+speech: English yes/no model ready; arenas frontend=8768 classifier=6948
+ST USBH: USB Device Connected
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000002 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: pipe 0 URB=4 HC_state=2 HCINT=0x00000000 HCINTMSK=0x000004ff HCTSIZ=0x60080008 HCCHAR=0x00100040 HPRT=0x00041805 PA9=1 PG7_nFAULT=1
+ST USBH: pipe 0 URB=4 HC_state=2 HCINT=0x00000000 HCINTMSK=0x000004ff HCTSIZ=0x60080008 HCCHAR=0x00100040 HPRT=0x00041805 PA9=1 PG7_nFAULT=1
+ST USBH: pipe 0 URB=4 HC_state=2 HCINT=0x00000000 HCINTMSK=0x000004ff HCTSIZ=0x60080008 HCCHAR=0x00100040 HPRT=0x00041805 PA9=1 PG7_nFAULT=1
+ST USBH: unrecovered error
+ST USBH ERROR: Control error: Device not responding
+ST USBH: USB Device Connected
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: pipe 1 URB=4 HC_state=2 HCINT=0x00000000 HCINTMSK=0x0000059f HCTSIZ=0x40080040 HCCHAR=0x20108040 HPRT=0x00041805 PA9=1 PG7_nFAULT=1
+ST USBH: pipe 0 URB=4 HC_state=2 HCINT=0x00000000 HCINTMSK=0x000004ff HCTSIZ=0x60080008 HCCHAR=0x20100040 HPRT=0x00041805 PA9=1 PG7_nFAULT=1
+ST USBH: pipe 0 URB=4 HC_state=2 HCINT=0x00000000 HCINTMSK=0x000004ff HCTSIZ=0x60080008 HCCHAR=0x00100040 HPRT=0x00041805 PA9=1 PG7_nFAULT=1
+
+uart:~$
+uart:~$
+HOST COMMAND: usbhost resume
+usbhost resume
+usbh middleware polling resumed
+uart:~$
+HOST COMMAND: usbhost descriptor
+usbhost descriptor
+full device descriptor not received
+uart:~$
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+scheduler: event priority=10
+events: enqueued=79 processed=79 overflow=0 high_water=7/128 max_latency_us=699723
+worker: ticks=152 wakeups=48 timeouts=1718 steps=14760
+worker_runtime: cycles=85235801 uptime_ms=19535
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00041801
+state: enumeration
+enum_state: idle
+control_state: setup_wait
+connected: 1
+port_enabled: 0
+cfg_len=0 ctrl_len=8 speed=2 timer=152 ctrl_timer=107 request=2 ep0_mps=64
+setup: 80 06 value=0100 index=0000 lecore: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000003 hcfg=00000202 hfir=00001770 hfnum=17703fff
+pipe0: urb=0 hc=0 int=00000000 size=60080008 char=c0100040 count=0 len=8 mps=64 addr=0 pid=3 toggle=0
+pipe1: urb=4 hc=2 int=00000000 size=40080040 char=20108040 count=0 len=8 mps=64 addr=0 pid=2 toggle=0
+pipe2: urb=0 hc=0 int=00000000 size=00000000 char=00000000 count=0 len=0 mps=0 addr=0 pid=0 toggle=0
+mouse IRQ last=00000000 frame=00000000 flags:
+mouse first IRQ=00000000 frame=00000000 char=00000000 size=0n0000000 mask=00000000
+gth=8
+audio: connected=0 ready=0 session=0 rate=0 ch=0 bits=0 level=0 packets=0 drops=0 errors=0 missed=0 reason=no audio device
+uart:~$
+BEGIN MEASUREMENT WINDOW
+
+END MEASUREMENT WINDOW
+
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+scheduler: event priority=10
+events: enqueued=79 processed=79 overflow=0 high_water=7/128 max_latency_us=699723
+worker: ticks=152 wakeups=48 timeouts=3920 steps=32376
+worker_runtime: cycles=115335809 uptime_ms=41812
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00041801
+state: enumeration
+enum_state: idle
+control_state: setup_wait
+connected: 1
+port_enabled: 0
+cfg_len=0 ctrl_len=8 speed=2 timer=152 ctrl_timer=107 request=2 ep0_mps=64
+setup: 80 06 value=0100 index=0000 lecore: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000003 hcfg=00000202 hfir=00001770 hfnum=17703fff
+pipe0: urb=0 hc=0 int=00000000 size=60080008 char=c0100040 count=0 len=8 mps=64 addr=0 pid=3 toggle=0
+pipe1: urb=4 hc=2 int=00000000 size=40080040 char=20108040 count=0 len=8 mps=64 addr=0 pid=2 toggle=0
+pipe2: urb=0 hc=0 int=00000000 size=00000000 char=00000000 count=0 len=0 mps=0 addr=0 pid=0 toggle=0
+mouse IRQ last=00000000 frame=00000000 flags:
+mouse first IRQ=00000000 frame=00000000 char=00000000 size=00000000 mask=00000000
+ngth=8
+audio: connected=0 ready=0 session=0 rate=0 ch=0 bits=0 level=0 packets=0 drops=0 errors=0 missed=0 reason=no audio device
+uart:~$

@@ -23,3 +23,33 @@ config APP_USB_HOST_HCD
 	  Enables the STM32Cube HAL Host Controller Driver (HCD) module,
 	  used by the STM32 USB Host Core bridge to drive OTG_FS in host
 	  mode for USB device enumeration.
+
+config APP_USB_HOST_EVENT_WORKER
+	bool "Experimental FIFO-notification-driven USB host worker"
+	depends on APP_USB_HOST_HCD
+	default y
+	select THREAD_RUNTIME_STATS
+	help
+	  Wake the USB host worker on queued HAL notifications and SOF ticks
+	  instead of continuously busy-waiting in HOST_CLASS. Hardware IRQ
+	  handling and microphone resubmission remain in interrupt context.
+	  Disable for the original 50 us polling baseline.
+
+config APP_USB_HOST_NO_IDLE_SLEEP
+	bool "Diagnostic: skip CPU WFI/WFE while testing USB"
+	depends on APP_USB_HOST_HCD
+	select ARM_ON_ENTER_CPU_IDLE_HOOK
+	default n
+	help
+	  Diagnostic comparison only. Keep the event worker blocking, but
+	  prevent the idle thread from sleeping the CPU. This does not save
+	  CPU power and must not be mistaken for a production fix.
+
+config APP_USB_HOST_ULPI_SLEEP_CLOCK_FIX
+	bool "Disable unused USB2 ULPI sleep clock for embedded FS PHY"
+	depends on APP_USB_HOST_HCD
+	default y
+	help
+	  Match Zephyr's STM32 USB device drivers: USB2's embedded FS PHY
+	  needs the unused ULPI clock disabled in CPU sleep. Disable only
+	  to reproduce the historical USB timing failure.

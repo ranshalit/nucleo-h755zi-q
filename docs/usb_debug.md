@@ -1,5 +1,17 @@
 # USB Host Bring-Up Debug Log (Nucleo-H755ZI-Q, `apps/zephyr-hello-shell`)
 
+## 2026-10-14 event-worker experiment
+
+Introduced on `feature/usb-event-worker`, the default host worker now blocks on IRQ/SOF
+notifications instead of continuously busy-waiting for 50 us. Mouse and
+microphone were validated across fresh resets, live input, and microphone
+stream/API load with normal CPU idle sleep enabled. This required disabling
+the unused USB2 ULPI sleep clock for the embedded FS PHY, matching Zephyr's
+STM32 USB device drivers, and coalescing repeated unchanged HAL notifications.
+The original polling mode remains selectable for A/B comparison and diagnostics.
+See [experiment report and raw evidence](experiments/usb-event-worker/README.md).
+The chronological findings below describe the earlier implementation.
+
 This document is a chronological record of USB bring-up, starting from
 "why doesn't the USB camera LED turn on." Earlier failures below describe
 the state *at that step*, not the current mouse result.

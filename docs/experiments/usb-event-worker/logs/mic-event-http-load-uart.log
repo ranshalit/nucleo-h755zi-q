@@ -1,0 +1,89 @@
+UTC: 2026-10-14T10:46:58.170929+00:00
+Trial: mode=event device=microphone capture_seconds=40.0
+
+uart:~$
+uart:~$
+HOST COMMAND: usbhost resume
+usbhost resume
+usbh middleware polling resumed
+uart:~$
+HOST COMMAND: usbhost descriptor
+usbhost descriptor
+vendor_id:    0x046d
+product_id:   0x0a56
+device_class: 0x00
+usb_version:  0x0200
+uart:~$
+HOST COMMAND: usbhost workerstats
+usbhost workerstats
+worker metrics cleared; FIFO and overflow evidence retained
+uart:~$
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=2014 processed=2014 overflow=0 high_water=21/128 max_latency_us=20903
+worker: ticks=2015 wakeups=4703 timeouts=0 steps=53736
+event_types: irq=0 urb=2014 last_overflow_type=0 irq_wakes=2014 repeated_urbs=0
+worker_runtime: cycles=2574939358 uptime_ms=61879
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: class
+enum_state: get_serial
+control_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=291 ctrl_len=3 speed=1 timer=59649 ctrl_timer=519 request=1 ep0_mps=64
+setup: a2 81 value=0100 index=0081 lecnore: gintsts=04000021 gintmsk=a320001gt8 haint=00000000 haintmsk=00000007 hchfg=00000201 hfir=0000bb80 hfnum=231b290c
+pipe0: urb=1 hc=2 int=00000000 si=ze=00000000 3
+char=20500040 count=0 len=0 mps=64 addr=1 pid=2 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=8000003d char=20508040 count=3 len=3 mps=64 addr=1 pid=2 toggle=0
+pipe2: urb=0 hc=0 int=00000000 size=000800c8 char=a05488c8 count=0 len=200 mps=200 addr=1 pid=0 toggle=1
+mouse IRQ last=00000020 frame=9f572934 flags:
+mouse first IRQ=00000020 frame=b91b035f char=205488c8 size=800000c8 mask=000003a7 5=58588
+audio: connected=1 ready=1 session=1 rate=48000 ch=2 bits=16 level=14 packets=59175 drops=2800224 errors=0 missed=0 reason=streaming
+uart:~$
+BEGIN MEASUREMENT WINDOW
+
+u
+3urt~rtp
+t:[2 [1;32art~$ 32mm
+END MEASUREMENT WINDOW
+
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=44145 processed=44145 overflow=0 high_water=52/128 max_latency_us=52241
+worker: ticks=44145 wakeups=102957 timeouts=0 steps=1176816
+event_types: irq=0 urb=44145 last_overflow_type=0 irq_wakes=44145 repeated_urbs=0
+worker_runtime: cycles=4307761965 uptime_ms=104430
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: class
+enum_state: get_serial
+control_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=291 ctrl_len=3 speed=1 timer=101770 ctrl_timer=519 request=1 ep0_mps=64
+setup: a2 81 value=0100 index=0081 lencore: gintsts=04000021 gintmsk=a32000g18 haint=0000t0000 haintmsk=00000007 hcfg=00000201 hfir=0000bb80 hfnum=0a470d95
+pipe0: urb=1 hc=2 int=00000000 sizeh=3
+=00000000 char=20500040 count=0 len=0 mps=64 addr=1 pid=2 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=8000003d char=20508040 count=3 len=3 mps=64 addr=1 pid=2 toggle=0
+pipe2: urb=0 hc=0 int=00000000 size=000800c8 char=805488c8 count=0 len=200 mps=200 addr=1 pid=0 toggle=0
+mouse IRQ last=00000020 frame=9ea70dbd flags:
+mouse first IRQ=00000020 frame=b91b035f char=205488c8 size=800000c8 mask=000003a7 5=100727
+audio: connected=1 ready=1 session=1 rate=48000 ch=2 bits=16 level=31 packets=101313 drops=4822848 errors=0 missed=0 reason=streaming
+uart:~$
+HOST COMMAND: speech status
+speech status
+speech state=3 reason=recognizing English yes/no session=1 windows=1017 gaps=0 drops=0
+prediction valid=1 label=3 score=816/1000 event=1 sequence=1
+inference=15298 us processing=63 us max_processing=27498 us
+uart:~$

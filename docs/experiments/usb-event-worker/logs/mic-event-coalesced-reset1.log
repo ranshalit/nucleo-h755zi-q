@@ -1,0 +1,134 @@
+UTC: 2026-10-14T10:43:08.960092+00:00
+Trial: mode=event device=microphone capture_seconds=10.0
+
+HOST ACTION: programmer hardware reset
+** Booting Zephyr OS build ***
+*** Booting Zephyr OS build ***
+
+uart:~$Hello World! nucleo_h755zi_q/stm32h755xx/m7
+Build time: 2026-10-14T10:30:58Z
+Blink threads started for yellow (400 ms) and red (700 ms)
+ *** Booting Zephyr OS build ***
+*** Booting Zephyr OS build ***
+
+uart:~$Hello World! nucleo_h755zi_q/stm32h755xx/m7
+Build time: 2026-10-14T10:30:58Z
+Blink threads started for yellow (400 ms) and red (700 ms)
+ HTTP server listening on http://192.168.55.2:80/
+usbhost: init start
+usbhost: gpio configured
+usbhost: PD10 VBUS_EN ODR=1 IDR=1, PA9 VBUS sense=0
+usbhost: VBUS settled PD10=1 PA9=0
+usbhost: AHB1LPENR=0x0e03c023 USB2_ULPI_sleep=0
+usbhost: HSI48 clock ready
+usbhost: USB33RDY ready
+usbhost: GOTGCTL=0x03010000 (CIDSTS=1, PA10_IDR=0, B-device/ID-high/NOT-grounded)
+usbhost: before CoreInit GUSBCFG=0x00001410 GCCFG=0x00000000 GRSTCTL=0x80000000
+usbhost: USB_CoreInit -> 0 (GUSBCFG=0x00001440 GCCFG=0x00010000 GRSTCTL=0x80000000)
+usbhost: USB_SetCurrentMode -> 0 (GUSBCFG=0x20001440 FHMOD=1 FDMOD=0 GINTSTS=0x14000029 CMOD=1)
+usbhost: USB_HostInit -> 0
+usbhost: GAHBCFG=0x00000000 GRXFSIZ=0x00000200 HNPTXFSIZ=0x01000200 HPTXFSIZ=0x00e00300 HCFG=0x00000200
+usbhost: hardware ready HPRT=0x00000000 GINTSTS=0x04000021 GINTMSK=0xa3200018
+usbhost: after HAL_HCD_Start GAHBCFG=0x00000001 GUSBCFG=0x20001440
+usbhost: VBUS on PD10=0 PA9=1 HPRT=0x00001000
+Camera stream listening on http://192.168.55.2:8081/
+Microphone stream listening on http://192.168.55.2:8082/
+speech: English yes/no model ready; arenas frontend=8768 classifier=6948
+ST USBH: USB Device Connected
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000002 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: PID: a56h
+ST USBH: VID: 46dh
+ST USBH: Address (#1) assigned.
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: event FIFO overflow (1683 type=4 irq=0 urb=1937); stopping host; reset required
+usbhost: VBUS off PD10=1 PA9=1 HPRT=0x00021405
+
+uart:~$
+uart:~$
+HOST COMMAND: usbhost resume
+usbhost resume
+usbh middleware polling resumed
+uart:~$
+HOST COMMAND: usbhost descriptor
+usbhost descriptor
+vendor_id:    0x046d
+product_id:   0x0a56
+device_class: 0x00
+usb_version:  0x0200
+uart:~$
+HOST COMMAND: usbhost workerstats
+usbhost workerstats
+worker metrics cleared; FIFO and overflow evidence retained
+uart:~$
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=0 processed=0 overflow=3252 high_water=0/128 max_latency_us=0
+worker: ticks=0 wakeups=0 timeouts=202 steps=0
+event_types: irq=0 urb=0 last_overflow_type=3 irq_wakes=0
+worker_runtime: cycles=90245228 uptime_ms=15207
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021000
+state: abort
+enum_state: get_full_configuration_descriptor
+control_state: data_in_wait
+connected: 0
+port_enabled: 0
+cfg_len=291 ctrl_len=291 speed=1 timer=368 ctrl_timer=245 request=2 ep0_mps=64
+setup: 80 06 value=0200 index=0000 lengcore: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000003 hcfg=00000201 hfir=0000bb80 hfnum=bb803fff
+pipe0: urb=1 hc=2 int=00000000 size=20000008 char=20500040 count=0 len=8 mps=64 addr=1 pid=3 toggle=0
+pipe1: urb=2 hc=2 int=00000020 size=00100080 char=20500040 count=192 len=291 mps=64 addr=1 pid=2 toggle=1
+pipe2: urb=0 hc=0 int=00000002 size=00000000 char=00000000 count=0 len=0 mps=0 addr=0 pid=0 toggle=0
+mouse IRQ last=00000000 frame=00000000 flags:
+mouse first IRQ=00000000 frame=00000000 char=00000000 size=00000000 mask=00000000
+th=291
+audio: connected=0 ready=0 session=0 rate=0 ch=0 bits=0 level=0 packets=0 drops=0 errors=0 missed=0 reason=no audio device
+uart:~$
+BEGIN MEASUREMENT WINDOW
+
+END MEASUREMENT WINDOW
+
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=0 processed=0 overflow=3252 high_water=0/128 max_latency_us=0
+worker: ticks=0 wakeups=0 timeouts=1401 steps=0
+event_types: irq=0 urb=0 last_overflow_type=3 irq_wakes=0
+worker_runtime: cycles=100240348 uptime_ms=27363
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021000
+state: abort
+enum_state: get_full_configuration_descriptor
+control_state: data_in_wait
+connected: 0
+port_enabled: 0
+cfg_len=291 ctrl_len=291 speed=1 timer=368 ctrl_timer=245 request=2 ep0_mps=64
+setup: 80 06 value=0200 index=0000 lengcore: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000003 hcfg=00000201 hfir=0000bb80 hfnum=bb803fff
+pipe0: urb=1 hc=2 int=00000000 size=20000008 char=20500040 count=0 len=8 mps=64 addr=1 pid=3 toggle=0
+pipe1: urb=2 hc=2 int=00000020 size=00100080 char=20500040 count=192 len=291 mps=64 addr=1 pid=2 toggle=1
+pipe2: urb=0 hc=0 int=00000002 size=00000000 char=00000000 count=0 len=0 mps=0 addr=0 pid=0 toggle=0
+mouse IRQ last=00000000 frame=00000000 flags:
+mouse first IRQ=00000000 frame=00000000 char=00000000 size=00000000 mask=00000000
+th=291
+audio: connected=0 ready=0 session=0 rate=0 ch=0 bits=0 level=0 packets=0 drops=0 errors=0 missed=0 reason=no audio device
+uart:~$
+HOST COMMAND: speech status
+speech status
+speech state=0 reason=no ready USB microphone session=0 windows=0 gaps=0 drops=0
+prediction valid=0 label=0 score=0/1000 event=0 sequence=0
+inference=0 us processing=0 us max_processing=0 us
+uart:~$

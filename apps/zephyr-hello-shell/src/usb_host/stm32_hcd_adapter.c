@@ -20,12 +20,24 @@
 #include "usbh_ioreq.h"
 #include "usb_gpio_capture.h"
 #include "usb_audio_capture.h"
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+#include "usb_host_events.h"
+#define HOST_EVENT(type, pipe, state) usb_host_event_post(type, pipe, state)
+#else
+#define HOST_EVENT(type, pipe, state) do { } while (0)
+#endif
 
 #define STM32_HCD_IRQ 101 /* OTG_FS_IRQn, RM0468 Table 135 */
 #define STM32_HCD_IRQ_PRI 5
 
 static HCD_HandleTypeDef hcd_handle;
 static bool hcd_poll_mode;
+#if defined(CONFIG_APP_USB_HOST_NO_IDLE_SLEEP)
+bool z_arm_on_enter_cpu_idle(void)
+{
+	return false;
+}
+#endif
 static uint32_t mouse_irq_counts[16];
 static uint32_t mouse_last_irq;
 static uint32_t mouse_last_frame;
@@ -58,6 +70,7 @@ void HAL_HCD_Connect_Callback(HCD_HandleTypeDef *hhcd)
 {
 	if (hhcd->pData != NULL) {
 		(void)USBH_LL_Connect(hhcd->pData);
+		HOST_EVENT(USB_HOST_EVENT_CONNECT, 0, 0);
 	}
 }
 
@@ -65,6 +78,7 @@ void HAL_HCD_Disconnect_Callback(HCD_HandleTypeDef *hhcd)
 {
 	if (hhcd->pData != NULL) {
 		(void)USBH_LL_Disconnect(hhcd->pData);
+		HOST_EVENT(USB_HOST_EVENT_DISCONNECT, 0, 0);
 	}
 }
 
@@ -72,6 +86,7 @@ void HAL_HCD_PortEnabled_Callback(HCD_HandleTypeDef *hhcd)
 {
 	if (hhcd->pData != NULL) {
 		USBH_LL_PortEnabled(hhcd->pData);
+		HOST_EVENT(USB_HOST_EVENT_PORT_ENABLED, 0, 0);
 	}
 }
 
@@ -79,6 +94,7 @@ void HAL_HCD_PortDisabled_Callback(HCD_HandleTypeDef *hhcd)
 {
 	if (hhcd->pData != NULL) {
 		USBH_LL_PortDisabled(hhcd->pData);
+		HOST_EVENT(USB_HOST_EVENT_PORT_DISABLED, 0, 0);
 	}
 }
 
@@ -86,22 +102,41 @@ void HAL_HCD_SOF_Callback(HCD_HandleTypeDef *hhcd)
 {
 	if (hhcd->pData != NULL) {
 		USBH_LL_IncTimer(hhcd->pData);
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+		usb_host_events_tick();
+#endif
 	}
 }
 
 void HAL_HCD_HC_NotifyURBChange_Callback(HCD_HandleTypeDef *hhcd, uint8_t chnum,
 					 HCD_URBStateTypeDef urb_state)
 {
-	if (hhcd->pData != NULL && urb_state == URB_DONE) {
-		usb_audio_capture_urb_done(hhcd->pData, chnum);
+	if (hhcd->pData != NULL) {
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+		usb_host_event_post_urb(chnum, urb_state);
+#endif
+		if (urb_state == URB_DONE) {
+			usb_audio_capture_urb_done(hhcd->pData, chnum);
+		}
 	}
 }
 
 static void stm32_hcd_isr(const void *arg)
 {
 	ARG_UNUSED(arg);
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+	uint32_t pending = hcd_handle.Instance->GINTSTS &
+			   hcd_handle.Instance->GINTMSK &
+			   ~USB_OTG_GINTSTS_SOF;
+#endif
 	record_mouse_irq();
 	HAL_HCD_IRQHandler(&hcd_handle);
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+	/* Also wake on intermediate channel/RX events without a terminal URB. */
+	if (pending != 0U) {
+		usb_host_events_irq();
+	}
+#endif
 }
 
 /*
@@ -157,6 +192,13 @@ static int adapter_init_hardware(void)
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9));
 
 	LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_USB2OTGHS);
+	if (IS_ENABLED(CONFIG_APP_USB_HOST_ULPI_SLEEP_CLOCK_FIX)) {
+		/* Match usb_dc_stm32/udc_stm32: USB2 embedded FS needs this in sleep. */
+		LL_AHB1_GRP1_DisableClockSleep(LL_AHB1_GRP1_PERIPH_USB2OTGHSULPI);
+	}
+	printf("usbhost: AHB1LPENR=0x%08lx USB2_ULPI_sleep=%lu\n",
+	       (unsigned long)RCC->AHB1LPENR,
+	       (unsigned long)((RCC->AHB1LPENR & RCC_AHB1LPENR_USB2OTGHSULPILPEN) != 0U));
 
 	/*
 	 * The OTG_FS embedded full-speed PHY needs a 48 MHz USB kernel clock.
@@ -438,6 +480,9 @@ USBH_StatusTypeDef USBH_LL_SubmitURB(USBH_HandleTypeDef *phost, uint8_t pipe,
 	HCD_HandleTypeDef *hcd = phost->pData;
 	HAL_StatusTypeDef status;
 
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+	usb_host_events_transfer_start(pipe);
+#endif
 	if (token == USBH_PID_SETUP && usb_gpio_capture_armed()) {
 		/*
 		 * Start the tight-loop D+/D- capture immediately before the

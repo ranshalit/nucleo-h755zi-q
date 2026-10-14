@@ -62,6 +62,10 @@ endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_hello_shell)
 
+if(CONFIG_APP_USB_HOST_EVENT_WORKER)
+  target_sources(app PRIVATE src/usb_host/usb_host_events.c)
+endif()
+
 if(CONFIG_APP_SPEECH_AI)
   include(cmake/speech_model.cmake)
   target_sources(app PRIVATE src/speech/speech_audio.c src/speech/speech_decision.c)

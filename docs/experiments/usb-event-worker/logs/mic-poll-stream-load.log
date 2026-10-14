@@ -1,0 +1,5 @@
+Trial: polling baseline, stream drained in memory; no PCM recording
+before: {"attached": true, "ready": true, "session": 1, "format": {"sample_rate_hz": 48000, "channels": 2, "bits_per_sample": 16}, "level": 5, "packets": 65418, "drops": 3100128, "errors": 0, "missed": 0, "reason": "streaming"}
+HTTP: 200 format: 48000 2 16 session: 1 bytes: 2883584 elapsed_s: 15.003 bytes_per_second: 192201.7
+after: {"attached": true, "ready": true, "session": 1, "format": {"sample_rate_hz": 48000, "channels": 2, "bits_per_sample": 16}, "level": 8, "packets": 80451, "drops": 3100416, "errors": 0, "missed": 0, "reason": "streaming"}
+speech: {"state": "running", "reason": "recognizing English yes/no", "label": "unknown", "score": 0.926, "last_event": {"label": "no", "sequence": 4, "uptime_ms": 62477}, "inference_us": 16408, "processing_us": 54, "max_processing_us": 16649, "windows": 790, "gaps": 0, "drops": 0, "session": 1}

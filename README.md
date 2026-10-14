@@ -661,7 +661,7 @@ Green is the stable LED used by the validation flow for deterministic write/read
 checks. The dashboard reflects that same behavior: yellow and red are live but
 can change again on their own because of the background blink threads.
 
-Connect a boot-protocol USB mouse directly to USER USB CN13; USB host polling
+Connect a boot-protocol USB mouse directly to USER USB CN13; USB host processing
 starts automatically at boot (`usbhost pause`/`resume` on the ST-LINK UART
 toggle it for debugging). The dashboard's USB mouse card shows a gliding cursor
 with a glowing trail that fades over about 1.5 s (cyan, or green/red/yellow
@@ -674,6 +674,16 @@ mouse card, so every 400 ms / 700 ms blink toggle is shown. Network status and
 uptime use a separate 1.5-second `/api/v1/status` refresh. Movement and press
 counts accumulate between page updates; they reset on mouse reconnect.
 This displays input from the board, not a host-computer mouse or keyboard.
+
+The default worker, introduced by the `feature/usb-event-worker` experiment, uses
+FIFO notifications and immediate IRQ/SOF wake-ups rather than a continuous
+50 us busy-wait. Hardware IRQ servicing and microphone resubmission remain in
+the ISR. `usbhost status` shows scheduling mode and queue/runtime counters;
+`usbhost workerstats` clears measurement counters without erasing overflow
+evidence. Original polling is available through `usb-poll-baseline.conf`;
+`usbhost pollmode on` is a separate, intentionally polling diagnostic.
+See the [A/B experiment report](docs/experiments/usb-event-worker/README.md)
+for hardware results, clock fix, limitations, and sanitized raw logs.
 
 The board has no dedicated temperature sensor, so the dashboard's "MCU die
 temp" card shows the STM32H755 internal die sensor (ADC3 channel 18,
@@ -842,10 +852,12 @@ Measured on the NUCLEO-H755ZI-Q on 2026-10-13:
 - Typical observed classifier inference was about **15–21 ms**; a longer
   live-dashboard recording observed up to 32.5 ms. Whole processing chunks
   can take longer under network load.
-- One `kernel thread list` snapshot reported speech **25%**, USB polling
+- Before the event-worker experiment, one `kernel thread list` snapshot reported speech **25%**, USB polling
   **67%**. These are cumulative shares, not a fresh utilization interval.
   `cpu usage 5000` still reported 100% busy because the unchanged low-priority
-  USB poll loop busy-waits; inference preempts it.
+  USB poll loop busy-waits; inference preempts it. The separate event-worker
+  experiment measured about 9% USB thread-attributed time with microphone
+  capture instead of about 71% in its polling comparator; see the report above.
 - The user reported **9/10 yes and 9/10 no** in a spoken trial. The local
   event recording did not cover the entire user trial, so this is a user
   observation, not an independently scored accuracy benchmark.

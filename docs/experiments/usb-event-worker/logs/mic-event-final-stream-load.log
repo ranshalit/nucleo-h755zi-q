@@ -1,0 +1,5 @@
+Trial: final event worker, PCM drained in memory; no microphone recording
+before: {"attached": true, "ready": true, "session": 1, "format": {"sample_rate_hz": 48000, "channels": 2, "bits_per_sample": 16}, "level": 8, "packets": 37276, "drops": 1749024, "errors": 0, "missed": 0, "reason": "streaming"}
+HTTP: 200 format: 48000 2 16 session: 1 bytes: 3846144 elapsed_s: 20.014 bytes_per_second: 192172.8
+after: {"attached": true, "ready": true, "session": 1, "format": {"sample_rate_hz": 48000, "channels": 2, "bits_per_sample": 16}, "level": 34, "packets": 57326, "drops": 1749312, "errors": 0, "missed": 0, "reason": "streaming"}
+speech: {"state": "running", "reason": "recognizing English yes/no", "label": "unknown", "score": 0.766, "last_event": null, "inference_us": 14753, "processing_us": 69, "max_processing_us": 31041, "windows": 559, "gaps": 0, "drops": 0, "session": 1}

@@ -1,0 +1,137 @@
+UTC: 2026-10-14T10:51:44.819091+00:00
+Trial: mode=event device=microphone capture_seconds=5.0
+
+HOST ACTION: programmer hardware reset
+*** Booting Zephyr OS build ***
+*** Booting Zephyr OS build ***
+
+uart:Hello World! nucleo_h755zi_q/stm32h755xx/m7
+Build time: 2026-10-14T10:30:58Z
+Blink threads started for yellow (400 ms) and red (700 ms)
+~$HTTP server listening on http://192.168.55.2:80/
+usbhost: init start
+usbhost: gpio configured
+usbhost: PD10 VBUS_EN ODR=1 IDR=1, PA9 VBUS sense=0
+ usbhost: VBUS settled PD10=1 PA9=0
+usbhost: AHB1LPENR=0x0e03c023 USB2_ULPI_sleep=0
+usbhost: HSI48 clock ready
+usbhost: USB33RDY ready
+usbhost: GOTGCTL=0x03010000 (CIDSTS=1, PA10_IDR=0, B-device/ID-high/NOT-grounded)
+usbhost: before CoreInit GUSBCFG=0x00001410 GCCFG=0x00000000 GRSTCTL=0x80000000
+usbhost: USB_CoreInit -> 0 (GUSBCFG=0x00001440 GCCFG=0x00010000 GRSTCTL=0x80000000)
+usbhost: USB_SetCurrentMode -> 0 (GUSBCFG=0x20001440 FHMOD=1 FDMOD=0 GINTSTS=0x14000029 CMOD=1)
+usbhost: USB_HostInit -> 0
+usbhost: GAHBCFG=0x00000000 GRXFSIZ=0x00000200 HNPTXFSIZ=0x01000200 HPTXFSIZ=0x00e00300 HCFG=0x00000200
+usbhost: hardware ready HPRT=0x00000000 GINTSTS=0x04000021 GINTMSK=0xa3200018
+usbhost: after HAL_HCD_Start GAHBCFG=0x00000001 GUSBCFG=0x20001440
+usbhost: VBUS on PD10=0 PA9=1 HPRT=0x00001000
+Camera stream listening on http://192.168.55.2:8081/
+Microphone stream listening on http://192.168.55.2:8082/
+speech: English yes/no model ready; arenas frontend=8768 classifier=6948
+ST USBH: USB Device Connected
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000002 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: PID: a56h
+ST USBH: VID: 46dh
+ST USBH: Address (#1) assigned.
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: Manufacturer : Logitech Inc
+ST USBH: Product : Logitech H570e Stereo
+ST USBH: Serial Number : 00000000
+ST USBH: Enumeration done.
+ST USBH: This device has only 1 configuration.
+ST USBH: Default configuration set.
+USBH_LL_OpenPipe: pipe=2 epnum=0x81 ep_type=1 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+ST USBH: audio IN IF1 alt1 EP 0x81 48000 Hz 2 ch 16-bit packet 200 B rate_control=1 session 1
+ST USBH: UAC1 microphone class started.
+ST USBH: audio sampling rate readback 48000 Hz
+ST USBH: audio capture ready on EP 0x81
+
+uart:~$
+uart:~$
+HOST COMMAND: usbhost resume
+usbhost resume
+usbh middleware polling resumed
+uart:~$
+HOST COMMAND: usbhost descriptor
+usbhost descriptor
+vendor_id:    0x046d
+product_id:   0x0a56
+device_class: 0x00
+usb_version:  0x0200
+uart:~$
+HOST COMMAND: usbhost workerstats
+usbhost workerstats
+worker metrics cleared; FIFO and overflow evidence retained
+uart:~$
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=2009 processed=2009 overflow=0 high_water=14/128 max_latency_us=13469
+worker: ticks=2008 wakeups=4923 timeouts=0 steps=55456
+event_types: irq=0 urb=2008 last_overflow_type=0 irq_wakes=2008 repeated_urbs=0
+worker_runtime: cycles=707216703 uptime_ms=15228
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: class
+enum_state: get_serial
+control_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=291 ctrl_len=3 speed=1 timer=13901 ctrl_timer=430 request=1 ep0_mps=64
+setup: a2 81 value=0100 index=0081 lecore: gintsts=040000n21 gintmsk=a3200018 haint=00000000 hagintmsk=00000t007 hcfg=0000h0201 hfir=0000bb80 hfnum=b0563658
+pipe0: urb=1 hc=2 int=00000000 size=00000=3
+000 char=00500040 count=0 len=0 mps=64 addr=1 pid=2 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=8000003d char=00508040 count=3 len=3 mps=64 addr=1 pid=2 toggle=0
+pipe2: urb=0 hc=0 int=00000000 size=000800c8 char=a05488c8 count=0 len=200 mps=200 addr=1 pid=0 toggle=1
+mouse IRQ last=00000020 frame=9fed368d flags:
+mouse first IRQ=00000020 frame=b96f03a4 char=005488c8 size=800000c8 mask=000003a7 5=12945
+audio: connected=1 ready=1 session=1 rate=48000 ch=2 bits=16 level=10 packets=13532 drops=609312 errors=0 missed=0 reason=streaming
+uart:~$
+BEGIN MEASUREMENT WINDOW
+
+END MEASUREMENT WINDOW
+
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=9033 processed=9033 overflow=0 high_water=68/128 max_latency_us=67791
+worker: ticks=9032 wakeups=21922 timeouts=0 steps=247640
+event_types: irq=0 urb=9032 last_overflow_type=0 irq_wakes=9032 repeated_urbs=0
+worker_runtime: cycles=1013113395 uptime_ms=22317
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: class
+enum_state: get_serial
+control_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=291 ctrl_len=3 speed=1 timer=20924 ctrl_timer=430 request=1 ep0_mps=64
+setup: a2 81 value=0100 index=0081 length=3
+core: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000007 hcfg=00000201 hfir=0000bb80 hfnum=981611d5
+pipe0: urb=1 hc=2 int=00000000 size=00000000 char=00500040 count=0 len=0 mps=64 addr=1 pid=2 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=8000003d char=00508040 count=3 len=3 mps=64 addr=1 pid=2 toggle=0
+pipe2: urb=0 hc=0 int=00000000 size=000800c8 char=a05488c8 count=0 len=200 mps=200 addr=1 pid=0 toggle=1
+mouse IRQ last=00000020 frame=a0ac11fe flags:
+mouse first IRQ=00000020 frame=b96f03a4 char=005488c8 size=800000c8 mask=000003a7 5=19969
+audio: connected=1 ready=1 session=1 rate=48000 ch=2 bits=16 level=7 packets=20555 drops=946416 errors=0 missed=0 reason=streaming
+uart:~$
+HOST COMMAND: speech status
+speech status
+speech state=3 reason=recognizing English yes/no session=1 windows=210 gaps=0 drops=0
+prediction valid=1 label=1 score=914/1000 event=0 sequence=0
+inference=13271 us processing=114 us max_processing=14651 us
+uart:~$

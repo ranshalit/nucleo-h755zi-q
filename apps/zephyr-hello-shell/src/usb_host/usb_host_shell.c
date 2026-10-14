@@ -15,6 +15,9 @@
 #include <zephyr/shell/shell.h>
 
 #include "usbh_core.h"
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+#include "usb_host_events.h"
+#endif
 
 extern USBH_ClassTypeDef usb_boot_mouse_class;
 extern USBH_ClassTypeDef usb_audio_capture_class;
@@ -121,6 +124,76 @@ static void usb_host_user_process(USBH_HandleTypeDef *phost, uint8_t id)
 	}
 }
 
+static void usb_host_process_step(void)
+{
+	stm32_hcd_adapter_poll_service();
+	(void)USBH_Process(&usb_host);
+	if (usb_host.gState == HOST_CHECK_CLASS) {
+		atomic_set(&usb_host_config_ready, 1);
+	} else if (usb_host.gState <= HOST_ENUMERATION) {
+		atomic_set(&usb_host_config_ready, 0);
+	}
+	if (usb_host.gState == HOST_CHECK_CLASS && usb_host.ClassNumber == 0U) {
+		printf("ST USBH: enumeration complete; no class driver registered\n");
+		usb_host.gState = HOST_ABORT_STATE;
+	}
+}
+
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+static bool usb_host_event_fault;
+
+static void usb_host_event_steps(bool running)
+{
+	if (!running || usb_host_event_fault) {
+		return;
+	}
+	/* Control/class transitions may need more than one step without an IRQ. */
+	for (uint32_t i = 0; i < 8U; ++i) {
+		usb_host_process_step();
+	}
+	usb_host_events_note_steps(8);
+}
+
+static void usb_host_event_iteration(void)
+{
+	struct usb_host_event event;
+	struct usb_host_event_stats stats;
+
+	(void)usb_host_events_wait(K_MSEC(10));
+	atomic_set(&usb_host_poll_busy, 1);
+	bool running = !atomic_get(&usb_host_poll_paused);
+
+	usb_host_events_snapshot(&stats);
+	if (stats.overflows != 0U && !usb_host_event_fault) {
+		usb_host_event_fault = true;
+		printf("ST USBH: event FIFO overflow (%lu type=%lu irq=%lu urb=%lu); "
+		       "stopping host; reset required\n",
+		       (unsigned long)stats.overflows,
+		       (unsigned long)stats.last_overflow_type,
+		       (unsigned long)stats.irq_events, (unsigned long)stats.urb_events);
+		if (usb_host.pActiveClass != NULL &&
+		    usb_host.pActiveClass->DeInit(&usb_host) != USBH_OK) {
+			printf("ST USBH: class teardown failed after FIFO overflow\n");
+		}
+		if (USBH_Stop(&usb_host) != USBH_OK) {
+			printf("ST USBH: host stop failed after FIFO overflow\n");
+		}
+		usb_host.gState = HOST_ABORT_STATE;
+	}
+	/* Bound each drain so a continuous producer cannot trap this loop. */
+	for (uint32_t i = 0; i < USB_HOST_EVENT_QUEUE_CAPACITY; ++i) {
+		if (!usb_host_event_take(&event)) {
+			break;
+		}
+		/* Notifications trigger reads of live HAL state, not state replay. */
+		usb_host_event_steps(running);
+	}
+	/* SOF or timeout handles endpoint deadlines even without a queued event. */
+	usb_host_event_steps(running);
+	atomic_set(&usb_host_poll_busy, 0);
+}
+#endif
+
 static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 {
 	uint8_t fast_poll_count = 0;
@@ -130,6 +203,19 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 	ARG_UNUSED(arg3);
 
 	while (true) {
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+		if (!stm32_hcd_adapter_get_poll_mode()) {
+			usb_host_event_iteration();
+			continue;
+		}
+		struct usb_host_event event;
+
+		for (uint32_t i = 0; i < USB_HOST_EVENT_QUEUE_CAPACITY; ++i) {
+			if (!usb_host_event_take(&event)) {
+				break;
+			}
+		}
+#endif
 		/*
 		 * Mark busy before sampling the pause flag so a shell command
 		 * that sets paused and then sees busy == 0 knows this thread
@@ -137,6 +223,9 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 		 */
 		atomic_set(&usb_host_poll_busy, 1);
 		bool running = !atomic_get(&usb_host_poll_paused);
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+		running = running && !usb_host_event_fault;
+#endif
 
 		if (running) {
 			/*
@@ -152,18 +241,7 @@ static void usb_host_poll_loop(void *arg1, void *arg2, void *arg3)
 			 * never has to worry about since it never enables this
 			 * IRQ in the first place.
 			 */
-			stm32_hcd_adapter_poll_service();
-			(void)USBH_Process(&usb_host);
-			if (usb_host.gState == HOST_CHECK_CLASS) {
-				atomic_set(&usb_host_config_ready, 1);
-			} else if (usb_host.gState <= HOST_ENUMERATION) {
-				atomic_set(&usb_host_config_ready, 0);
-			}
-			if (usb_host.gState == HOST_CHECK_CLASS &&
-			    usb_host.ClassNumber == 0U) {
-				printf("ST USBH: enumeration complete; no class driver registered\n");
-				usb_host.gState = HOST_ABORT_STATE;
-			}
+			usb_host_process_step();
 		}
 		atomic_set(&usb_host_poll_busy, 0);
 		/*
@@ -208,6 +286,9 @@ uint8_t USBH_ClassMatches(USBH_HandleTypeDef *phost, USBH_ClassTypeDef *pclass)
 
 int board_usb_host_start(void)
 {
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+	usb_host_events_reset();
+#endif
 	if (USBH_Init(&usb_host, usb_host_user_process, 0U) != USBH_OK ||
 	    usb_host.pData == NULL) {
 		usb_host_init_result = -EIO;
@@ -252,6 +333,47 @@ static int cmd_usbhost_status(const struct shell *shell, size_t argc, char **arg
 	ARG_UNUSED(argv);
 
 	shell_print(shell, "stack: ST stm32-mw-usb-host Core");
+	shell_print(shell, "cpu_idle_sleep: %s",
+		    IS_ENABLED(CONFIG_APP_USB_HOST_NO_IDLE_SLEEP) ? "disabled" : "enabled");
+	shell_print(shell, "usb2_ulpi_sleep_clock_fix: %s",
+		    IS_ENABLED(CONFIG_APP_USB_HOST_ULPI_SLEEP_CLOCK_FIX) ? "on" : "off");
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+	struct usb_host_event_stats stats;
+
+	usb_host_events_snapshot(&stats);
+	shell_print(shell, "scheduler: %s priority=%d",
+		    stm32_hcd_adapter_get_poll_mode() ? "diagnostic-poll" : "event",
+		    USB_HOST_POLL_THREAD_PRIORITY);
+	shell_print(shell, "events: enqueued=%lu processed=%lu overflow=%lu "
+		    "high_water=%lu/%u max_latency_us=%lu",
+		    (unsigned long)stats.enqueued, (unsigned long)stats.processed,
+		    (unsigned long)stats.overflows, (unsigned long)stats.high_water,
+		    USB_HOST_EVENT_QUEUE_CAPACITY,
+		    (unsigned long)stats.max_latency_us);
+	shell_print(shell, "worker: ticks=%lu wakeups=%lu timeouts=%lu steps=%lu",
+		    (unsigned long)stats.ticks, (unsigned long)stats.wakeups,
+		    (unsigned long)stats.timeouts, (unsigned long)stats.steps);
+	shell_print(shell, "event_types: irq=%lu urb=%lu last_overflow_type=%lu "
+		    "irq_wakes=%lu repeated_urbs=%lu",
+		    (unsigned long)stats.irq_events, (unsigned long)stats.urb_events,
+		    (unsigned long)stats.last_overflow_type,
+		    (unsigned long)stats.irq_wakes, (unsigned long)stats.repeated_urbs);
+#else
+	shell_print(shell, "scheduler: poll-50us priority=%d",
+		    USB_HOST_POLL_THREAD_PRIORITY);
+#endif
+#if defined(CONFIG_THREAD_RUNTIME_STATS)
+	k_thread_runtime_stats_t runtime;
+	int runtime_ret = k_thread_runtime_stats_get(&usb_host_poll_thread, &runtime);
+
+	if (runtime_ret == 0) {
+		shell_print(shell, "worker_runtime: cycles=%llu uptime_ms=%lld",
+			    (unsigned long long)runtime.execution_cycles,
+			    (long long)k_uptime_get());
+	} else {
+		shell_error(shell, "worker runtime stats failed: %d", runtime_ret);
+	}
+#endif
 	shell_print(shell, "PA10_IDR: %d", stm32_hcd_adapter_id_pin_level());
 	shell_print(shell, "CIDSTS: %d", stm32_hcd_adapter_id_status());
 	shell_print(shell, "HPRT: 0x%08x", stm32_hcd_adapter_port_status());
@@ -317,6 +439,21 @@ static int cmd_usbhost_descriptor(const struct shell *shell, size_t argc,
 	shell_print(shell, "usb_version:  0x%04x",
 		    usb_host.device.DevDesc.bcdUSB);
 	return 0;
+}
+
+static int cmd_usbhost_workerstats(const struct shell *shell, size_t argc,
+				 char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+#if defined(CONFIG_APP_USB_HOST_EVENT_WORKER)
+	usb_host_events_clear_metrics();
+	shell_print(shell, "worker metrics cleared; FIFO and overflow evidence retained");
+	return 0;
+#else
+	shell_error(shell, "worker metrics unavailable in polling baseline");
+	return -ENOTSUP;
+#endif
 }
 
 static int usb_host_poll_quiesce(bool *was_paused)
@@ -833,6 +970,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_usbhost,
 	SHELL_CMD(pollmode, NULL,
 		  "Toggle bare-metal-style synchronous IRQ polling (usbhost pollmode [on|off])",
 		  cmd_usbhost_pollmode),
+	SHELL_CMD(workerstats, NULL,
+		  "Clear event worker measurement counters (preserves FIFO and overflows)",
+		  cmd_usbhost_workerstats),
 	SHELL_SUBCMD_SET_END
 );
 

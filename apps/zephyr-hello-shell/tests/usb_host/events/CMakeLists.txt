@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20.0)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(usb_host_events_tests)
+target_sources(app PRIVATE src/main.c ../../../src/usb_host/usb_host_events.c)
+target_include_directories(app PRIVATE ../../../src/usb_host)

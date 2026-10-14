@@ -1,0 +1,638 @@
+UTC: 2026-10-14T10:21:42.998939+00:00
+Trial: mode=poll-50us device=mouse capture_seconds=20.0
+usbhost: after HAL_HCD_Start GAHBCFG=0x00000001 GUSBCFG=0x20001440
+usbhost: VBUS on PD10=0 PA9=1 HPRT=0x00041801
+Camera stream listening on http://192.168.55.2:8081/
+Microphone stream listening on http://192.168.55.2:8082/
+speech: English yes/no model ready; arenas frontend=8768 classifier=6948
+ST USBH: USB Device Connected
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000002 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: PID: 301ah
+ST USBH: VID: 413ch
+ST USBH: Address (#1) assigned.
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000003 GINTMSK=0xa3200018
+ST USBH: Manufacturer : PixArt
+ST USBH: Product : Dell MS116 USB Optical Mouse
+ST USBH: Serial Number : N/A
+ST USBH: Enumeration done.
+ST USBH: This device has only 1 configuration.
+ST USBH: Default configuration set.
+ST USBH: Device remote wakeup enabled
+USBH_LL_OpenPipe: pipe=2 epnum=0x81 ep_type=3 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+ST USBH: Boot mouse class started.
+ST USBH: boot mouse ready on EP 0x81 (interval 10 ms)
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-4 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-4 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=4 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=17 dy=-18 wheel=0
+ST USBH: mouse buttons=0 dx=26 dy=-17 wheel=0
+ST USBH: mouse buttons=0 dx=25 dy=-16 wheel=0
+ST USBH: mouse buttons=0 dx=21 dy=-13 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=-13 wheel=0
+ST USBH: mouse buttons=0 dx=17 dy=-10 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=-10 wheel=0
+ST USBH: mouse buttons=0 dx=21 dy=-9 wheel=0
+ST USBH: mouse buttons=0 dx=24 dy=-7 wheel=0
+ST USBH: mouse buttons=0 dx=23 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=21 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=11 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-37 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-61 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-73 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-77 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-71 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-59 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=-42 dy=8 wheel=0
+ST USBH: mouse buttons=0 dx=-21 dy=10 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=10 wheel=0
+ST USBH: mouse buttons=0 dx=4 dy=8 wheel=0
+ST USBH: mouse buttons=0 dx=34 dy=7 wheel=0
+ST USBH: mouse buttons=0 dx=63 dy=8 wheel=0
+ST USBH: mouse buttons=0 dx=102 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=114 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=107 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=89 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=70 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=39 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=5 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-51 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-88 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-102 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-117 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-124 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-105 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=-59 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=43 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=78 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=99 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=98 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=89 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=68 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=51 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=32 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-16 dy=6 wheel=0
+ST USBH: mouse buttons=0 dx=-53 dy=12 wheel=0
+ST USBH: mouse buttons=0 dx=-79 dy=11 wheel=0
+ST USBH: mouse buttons=0 dx=-90 dy=8 wheel=0
+ST USBH: mouse buttons=0 dx=-97 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-91 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-71 dy=-5 wheel=0
+ST USBH: mouse buttons=0 dx=-15 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=26 dy=7 wheel=0
+ST USBH: mouse buttons=0 dx=57 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=81 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=92 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=90 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=68 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=47 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-30 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-53 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-61 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-69 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-65 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-48 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-19 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=8 wheel=0
+ST USBH: mouse buttons=0 dx=44 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=59 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=67 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=63 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=54 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=36 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=18 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=4 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-5 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-29 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-46 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-54 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-61 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-64 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-55 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-42 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=37 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=52 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=60 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=63 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=58 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=47 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=32 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=15 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=1 wheel=0
+ST U
+
+uart:~$
+uart:~$ ST USBH: mouse buttons=0 dx=4 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=2 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+
+HOST COMMAND: usbhost resume
+usbhost resume
+usbh middleware polling resumed
+uart:~$ ST USBH: mouse buttons=0 dx=1 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=16 dy=-8 wheel=0
+ST USBH: mouse buttons=0 dx=16 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=29 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=32 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=25 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=15 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-6 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-19 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-27 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-33 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-35 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-37 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-34 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=-27 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=12 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=28 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=38 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=39 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=31 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=12 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-12 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-25 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-32 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-38 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-39 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-30 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-10 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=23 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=28 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=34 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=32 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=24 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=17 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-7 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-15 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=-6 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=5 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=17 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=17 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=12 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-24 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-33 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-39 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-35 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-15 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=5 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=8 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=4 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=4 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=12 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=9 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=13 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=14 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=11 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-1 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=18 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-4 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-11 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-23 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-28 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-23 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=14 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=27 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=39 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=50 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=45 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=33 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=21 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-36 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-47 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-54 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-60 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-58 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-45 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-29 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=18 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=30 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=40 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=48 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=46 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=40 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=30 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=9 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-10 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-25 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-40 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-47 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-45 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-38 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=-21 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-4 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=16 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=23 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=29 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=31 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=29 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=14 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=5 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-10 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-17 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-22 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-25 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-20 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-10 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=5 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+
+HOST COMMAND: usbhost descriptor
+usbhost descriptor
+vendor_id:    0x413c
+product_id:   0x301a
+device_class: 0x00
+usb_version:  0x0200
+uart:~$ ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-4 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-6 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-12 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-12 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-7 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-5 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=16 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=25 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=12 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=4 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-12 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-20 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-19 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-17 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-6 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=13 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=18 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=20 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=16 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-15 dy=3 wheel=0
+
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+scheduler: poll-50us priority=10
+worker_runtime: cycles=7ST USBH: mouse buttons=0 dx=-15 dy=2 wheel=0
+580119865 uptime_ms=16852
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00041805
+state: class
+enum_state: get_serial
+contrST USBH: mouse buttons=0 dx=-18 dy=2 wheel=0
+ol_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=34 ctrl_len=0 speed=2 timer=15903 ctrl_timer=103 request=ST USBH: mouse buttons=0 dx=-18 dy=1 wheel=0
+1 ep0_mps=8
+setup: 21 0b value=0000 index=0000 lecore: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000007 hcfg=00000202 hfir=00001770 hfnum=09623e2d
+pipe0: urb=1 hc=2 int=00000000 size=20000008 char=20500008 count=0 len=8 mps=8 addr=1 pid=3 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=80000008 char=20508008 count=0 len=0 mps=8 addr=1 pid=2 toggle=1
+pipe2: urb=1 hc=1 int=00000000 size=c0000001 char=205c8804 count=3 len=4 mngps=4 addr=1 pid=0 toggle=1
+mouse IRQ last=00000010 frame=16283de2 flags:
+mouse first IRQ=00000010 frame=1625006b char=e05c8804 size=00080004 mask=0000079f 4=748
+th=ST USBH: mouse buttons=0 dx=-19 dy=2 wheel=0
+0
+mouse: reports=543 buttons=0 dx=-18 dy=1 wheel=0
+audio: connected=0 ready=0 session=0 rate=0 ch=0 bits=0 level=0 packets=0 drops=0 errors=0 missed=0 reason=no audio device
+uart:~$ ST USBH: mouse buttons=0 dx=5 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=8 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=11 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+
+BEGIN MEASUREMENT WINDOW
+ST USBH: mouse buttons=0 dx=7 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=8 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=12 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=14 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=10 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=8 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-5 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-15 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-24 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-27 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-27 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-21 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-16 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-6 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=14 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=20 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=25 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=14 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-4 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-17 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-23 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-28 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-28 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-26 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-17 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-7 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=7 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=26 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=43 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=51 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=49 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=42 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=31 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=15 dy=-3 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-19 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-26 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=-30 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-31 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-25 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-11 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-1 wheel=0
+ST USBH: mouse buttons=4 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-5 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-6 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=-5 wheel=0
+ST USBH: mouse buttons=0 dx=-25 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=-66 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-86 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-83 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-82 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-77 dy=6 wheel=0
+ST USBH: mouse buttons=0 dx=-74 dy=11 wheel=0
+ST USBH: mouse buttons=0 dx=-69 dy=14 wheel=0
+ST USBH: mouse buttons=0 dx=-61 dy=17 wheel=0
+ST USBH: mouse buttons=0 dx=-57 dy=19 wheel=0
+ST USBH: mouse buttons=0 dx=-46 dy=20 wheel=0
+ST USBH: mouse buttons=0 dx=-33 dy=21 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=23 wheel=0
+ST USBH: mouse buttons=0 dx=5 dy=20 wheel=0
+ST USBH: mouse buttons=0 dx=29 dy=19 wheel=0
+ST USBH: mouse buttons=0 dx=47 dy=9 wheel=0
+ST USBH: mouse buttons=0 dx=53 dy=3 wheel=0
+ST USBH: mouse buttons=0 dx=53 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=46 dy=-6 wheel=0
+ST USBH: mouse buttons=0 dx=42 dy=-6 wheel=0
+ST USBH: mouse buttons=0 dx=31 dy=-5 wheel=0
+ST USBH: mouse buttons=0 dx=22 dy=-8 wheel=0
+ST USBH: mouse buttons=0 dx=13 dy=-9 wheel=0
+ST USBH: mouse buttons=0 dx=5 dy=-9 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-8 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=-6 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=-7 wheel=0
+ST USBH: mouse buttons=0 dx=-3 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=16 dy=-7 wheel=0
+ST USBH: mouse buttons=0 dx=31 dy=-8 wheel=0
+ST USBH: mouse buttons=0 dx=45 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=55 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=50 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=40 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=19 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=-13 dy=6 wheel=0
+ST USBH: mouse buttons=0 dx=-10 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=-6 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=2 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-4 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=2 wheel=0
+ST USBH: mouse buttons=2 dx=-5 dy=2 wheel=0
+ST USBH: mouse buttons=2 dx=-2 dy=1 wheel=0
+ST USBH: mouse buttons=0 dx=3 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=2 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=4 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=4 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=4 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: mouse buttons=4 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=4 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=2 dx=0 dy=0 wheel=0
+
+END MEASUREMENT WINDOW
+
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+scheduler: poll-50us priority=10
+worker_runtime: cycles=18090032220 uptime_ms=39132
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00041805
+state: class
+enum_state: get_serial
+control_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=34 ctrl_len=0 speed=2 timer=37956 ctrl_timer=103 request=1 ep0_mps=8
+setup: 21 0b value=0000 index=0000 lecore: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=0000000n7 hcfg=00000202 hfir=00001770 hfnum=1513144e
+pipe0: urb=1 hc=2 int=00000000 size=20000008 char=20500008 count=0 len=8 mps=8 addr=1 pid=3 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=80000008 char=20508008 count=0 len=0 mps=8 addr=1 pid=2 toggle=1
+pipe2: urb=1 hc=1 int=00000000 size=c0000001 char=205c8804 count=3 len=4 mps=4 addr=1 pid=0 toggle=1
+mouse IRQ last=00000010 frame=16261444 flags:
+mouse first IRQ=00000010 frame=1625006b char=e05c8804 size=00080004 mask=0000079f 4=2493
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+gth=0
+mouse: reports=748 buttons=0 dx=0 dy=0 wheel=0
+audio: connected=0 ready=0 session=0 rate=0 ch=0 bits=0 level=0 packets=0 drops=0 errors=0 missed=0 reason=no audio device
+uart:~$ ST USBH: mouse buttons=4 dx=0 dy=0 wheel=0
+ST USBH: mouse buttons=1 dx=0 dy=0 wheel=0

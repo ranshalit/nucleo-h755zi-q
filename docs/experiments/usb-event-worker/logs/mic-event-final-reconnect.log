@@ -1,0 +1,164 @@
+UTC: 2026-10-14T10:57:20.619677+00:00
+Trial: mode=event device=microphone capture_seconds=10.0
+T USBH: mouse buttons=0 dx=-9 dy=-27 wheel=0
+ST USBH: mouse buttons=0 dx=-29 dy=-60 wheel=0
+ST USBH: mouse buttons=0 dx=-53 dy=-65 wheel=0
+ST USBH: mouse buttons=0 dx=-62 dy=-62 wheel=0
+ST USBH: mouse buttons=0 dx=-53 dy=-47 wheel=0
+ST USBH: mouse buttons=0 dx=-38 dy=-35 wheel=0
+ST USBH: mouse buttons=0 dx=-12 dy=-17 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=-2 wheel=0
+ST USBH: mouse buttons=0 dx=-41 dy=5 wheel=0
+ST USBH: mouse buttons=0 dx=-58 dy=15 wheel=0
+ST USBH: mouse buttons=0 dx=-66 dy=26 wheel=0
+ST USBH: mouse buttons=0 dx=-49 dy=26 wheel=0
+ST USBH: mouse buttons=0 dx=-43 dy=26 wheel=0
+ST USBH: mouse buttons=0 dx=-34 dy=31 wheel=0
+ST USBH: mouse buttons=0 dx=-15 dy=31 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=26 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=24 wheel=0
+ST USBH: mouse buttons=0 dx=-12 dy=23 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=22 wheel=0
+ST USBH: mouse buttons=0 dx=-21 dy=19 wheel=0
+ST USBH: mouse buttons=0 dx=-24 dy=20 wheel=0
+ST USBH: mouse buttons=0 dx=-18 dy=17 wheel=0
+ST USBH: mouse buttons=0 dx=-15 dy=17 wheel=0
+ST USBH: mouse buttons=0 dx=-8 dy=17 wheel=0
+ST USBH: mouse buttons=0 dx=-2 dy=16 wheel=0
+ST USBH: mouse buttons=0 dx=4 dy=16 wheel=0
+ST USBH: mouse buttons=0 dx=17 dy=15 wheel=0
+ST USBH: mouse buttons=0 dx=35 dy=12 wheel=0
+ST USBH: mouse buttons=0 dx=41 dy=12 wheel=0
+ST USBH: mouse buttons=0 dx=34 dy=10 wheel=0
+ST USBH: mouse buttons=0 dx=25 dy=12 wheel=0
+ST USBH: mouse buttons=0 dx=18 dy=6 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=4 wheel=0
+ST USBH: mouse buttons=0 dx=21 dy=-6 wheel=0
+ST USBH: mouse buttons=0 dx=34 dy=-11 wheel=0
+ST USBH: mouse buttons=0 dx=31 dy=-6 wheel=0
+ST USBH: mouse buttons=0 dx=8 dy=-11 wheel=0
+ST USBH: mouse buttons=0 dx=6 dy=-7 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-4 wheel=0
+ST USBH: mouse buttons=0 dx=-6 dy=-7 wheel=0
+ST USBH: mouse buttons=0 dx=-16 dy=-12 wheel=0
+ST USBH: mouse buttons=0 dx=-23 dy=-14 wheel=0
+ST USBH: mouse buttons=0 dx=-28 dy=-16 wheel=0
+ST USBH: mouse buttons=0 dx=-34 dy=-14 wheel=0
+ST USBH: mouse buttons=0 dx=-40 dy=-13 wheel=0
+ST USBH: mouse buttons=0 dx=-38 dy=-7 wheel=0
+ST USBH: mouse buttons=0 dx=-24 dy=-1 wheel=0
+ST USBH: mouse buttons=0 dx=-9 dy=2 wheel=0
+ST USBH: mouse buttons=0 dx=-1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=1 dy=0 wheel=0
+ST USBH: mouse buttons=0 dx=0 dy=-1 wheel=0
+ST USBH: device disconnected
+ST USBH: USB Device disconnected
+usbhost: after HAL_HCD_Start GAHBCFG=0x00000001 GUSBCFG=0x20001440
+ST USBH: USB Device Connected
+ST USBH: USB Device Reset Completed
+ST USBH: device connected
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+ST USBH: PID: a56h
+ST USBH: VID: 46dh
+ST USBH: Address (#1) assigned.
+USBH_LL_OpenPipe: pipe=1 epnum=0x80 ep_type=0 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+USBH_LL_OpenPipe: pipe=0 epnum=0x00 ep_type=0 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+ST USBH: Manufacturer : Logitech Inc
+ST USBH: Product : Logitech H570e Stereo
+ST USBH: Serial Number : 00000000
+ST USBH: Enumeration done.
+ST USBH: This device has only 1 configuration.
+ST USBH: Default configuration set.
+USBH_LL_OpenPipe: pipe=2 epnum=0x81 ep_type=1 ret=0 HAINTMSK=0x00000007 GINTMSK=0xa3200018
+ST USBH: audio IN IF1 alt1 EP 0x81 48000 Hz 2 ch 16-bit packet 200 B rate_control=1 session 1
+ST USBH: UAC1 microphone class started.
+ST USBH: audio sampling rate readback 48000 Hz
+ST USBH: audio capture ready on EP 0x81
+
+uart:~$
+uart:~$
+HOST COMMAND: usbhost resume
+usbhost resume
+usbh middleware polling resumed
+uart:~$
+HOST COMMAND: usbhost descriptor
+usbhost descriptor
+vendor_id:    0x046d
+product_id:   0x0a56
+device_class: 0x00
+usb_version:  0x0200
+uart:~$
+HOST COMMAND: usbhost workerstats
+usbhost workerstats
+worker metrics cleared; FIFO and overflow evidence retained
+uart:~$
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=2015 processed=2013 overflow=0 high_water=14/128 max_latency_us=13412
+worker: ticks=2015 wakeups=4942 timeouts=0 steps=55640
+event_types: irq=0 urb=2015 last_overflow_type=0 irq_wakes=2015 repeated_urbs=0
+worker_runtime: cycles=2736404520 uptime_ms=140071
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: class
+enum_state: get_serial
+control_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=291 ctrl_len=3 speed=1 timer=25331 ctrl_timer=576 request=1 ep0_mps=64
+setup: a2 81 value=0100 index=0081 lecore: gintsnts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000007 hcfg=00000201g hfir=0000bb8t0 hfnum=3d4122fe
+pipe0: urb=1 hc=2 int=00000000 sih=3
+ze=00000000 char=00500040 count=0 len=0 mps=64 addr=1 pid=2 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=8000003d char=00508040 count=3 len=3 mps=64 addr=1 pid=2 toggle=1
+pipe2: urb=0 hc=0 int=00000000 size=000800c8 char=805488c8 count=0 len=200 mps=200 addr=1 pid=0 toggle=1
+mouse IRQ last=00000020 frame=9e1d2326 flags:
+mouse first IRQ=00000010 frame=16270172 char=c05c8804 size=00080004 mask=0000079f 1=1 4=8808 5=24225
+audio: connected=1 ready=1 session=1 rate=48000 ch=2 bits=16 level=5 packets=24816 drops=1150800 errors=0 missed=0 reason=streaming
+uart:~$
+BEGIN MEASUREMENT WINDOW
+
+END MEASUREMENT WINDOW
+
+HOST COMMAND: usbhost status
+usbhost status
+stack: ST stm32-mw-usb-host Core
+cpu_idle_sleep: enabled
+usb2_ulpi_sleep_clock_fix: on
+scheduler: event priority=10
+events: enqueued=14052 processed=14052 overflow=0 high_water=68/128 max_latency_us=68332
+worker: ticks=14052 wakeups=34260 timeouts=0 steps=386496
+event_types: irq=0 urb=14052 last_overflow_type=0 irq_wakes=14052 repeated_urbs=0
+worker_runtime: cycles=3261356933 uptime_ms=152219
+PA10_IDR: 0
+CIDSTS: 0
+HPRT: 0x00021405
+state: class
+enum_state: get_serial
+control_state: idle
+connected: 1
+port_enabled: 1
+cfg_len=291 ctrl_len=3 speed=1 timer=37358 ctrl_timer=576 request=1 ep0_mps=64
+setup: a2 81 value=0100 index=0081 lecore: gintsts=04000021 gintmsk=a3200018 haint=00000000 haintmsk=00000007 hcfg=00000201 hfir=ngth=3
+0000bb80 hfnum=840e11f8
+pipe0: urb=1 hc=2 int=00000000 size=00000000 char=00500040 count=0 len=0 mps=64 addr=1 pid=2 toggle=0
+pipe1: urb=1 hc=2 int=00000000 size=8000003d char=00508040 count=3 len=3 mps=64 addr=1 pid=2 toggle=1
+pipe2: urb=0 hc=0 int=00000000 size=000800c8 char=a05488c8 count=0 len=200 mps=200 addr=1 pid=0 toggle=0
+mouse IRQ last=00000020 frame=9ecd122f flags:
+mouse first IRQ=00000010 frame=16270172 char=c05c8804 size=00080004 mask=0000079f 1=1 4=8808 5=36251
+audio: connected=1 ready=1 session=1 rate=48000 ch=2 bits=16 level=14 packets=36843 drops=1728096 errors=0 missed=0 reason=streaming
+uart:~$
+HOST COMMAND: speech status
+speech status
+speech state=3 reason=recognizing English yes/no session=1 windows=373 gaps=0 drops=0
+prediction valid=1 label=1 score=574/1000 event=0 sequence=0
+inference=13194 us processing=65 us max_processing=14677 us
+uart:~$
