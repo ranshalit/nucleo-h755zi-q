@@ -164,6 +164,18 @@ async function main() {
     speech.last_event = {label: 'no', sequence: 11, uptime_ms: 34000};
     await page3.waitForFunction(() => document.getElementById('voice-no')?.getAttribute('data-pressed') === '1', {timeout: 5000});
     await page3.close();
+    failSpeech = true;
+    speech = {state: 'running', reason: 'recognizing', label: 'silence', score: .9,
+      last_event: {label: 'no', sequence: 12, uptime_ms: 36000}, session: 3,
+      inference_us: 1500, max_processing_us: 2400, threshold_percent: 80};
+    const page4 = await browser.newPage();
+    await page4.goto(`http://127.0.0.1:${server.address().port}`);
+    await page4.waitForFunction(() => document.getElementById('speech-state')?.textContent === 'error', {timeout: 5000});
+    failSpeech = false;
+    await page4.waitForFunction(() => document.getElementById('voice-pad')?.getAttribute('data-disabled') === '0', {timeout: 5000, polling: 50});
+    await new Promise(r => setTimeout(r, 300));
+    assert.equal(await page4.$eval('#voice-no', n => n.getAttribute('data-pressed')), '0', 'stale no pressed after failed first poll');
+    await page4.close();
     speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
     assert.equal(ledRequests, 0, 'speech changed LED state');
     console.log('PASS: speech states, direction events, joystick/buttons, threshold updates/errors and unchanged LEDs');
