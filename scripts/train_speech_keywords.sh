@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${SPEECH_TRAIN_DIR:-${HOME}/kws-train}"
-WORDS="${SPEECH_WORDS:-yes,no,up,down,left,right}"
+WORDS="${SPEECH_WORDS:-yes,no,up,down,left,right,stop}"
 STEPS="${SPEECH_STEPS:-12000,3000}"
 RATES="${SPEECH_RATES:-0.001,0.0001}"
 TRAIN="${SPEECH_TRAIN_SUBDIR:-train}"
