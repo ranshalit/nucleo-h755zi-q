@@ -33,6 +33,7 @@
 #define MOUSE_RESPONSE_BUF_SIZE 256
 #define MIC_RESPONSE_BUF_SIZE 384
 #define LED_POST_BUF_SIZE 64
+#define SPEECH_SETTINGS_POST_BUF_SIZE 64
 
 struct led_command {
 	char led[16];
@@ -42,6 +43,14 @@ struct led_command {
 static const struct json_obj_descr led_command_descr[] = {
 	JSON_OBJ_DESCR_PRIM(struct led_command, led, JSON_TOK_STRING_BUF),
 	JSON_OBJ_DESCR_PRIM(struct led_command, action, JSON_TOK_STRING_BUF),
+};
+
+struct speech_threshold_command {
+	int32_t threshold_percent;
+};
+
+static const struct json_obj_descr speech_threshold_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct speech_threshold_command, threshold_percent, JSON_TOK_NUMBER),
 };
 
 static uint16_t board_http_port = CONFIG_APP_HTTP_PORT;
@@ -724,6 +733,81 @@ static struct http_resource_detail_dynamic speech_resource_detail = {
 	.cb = speech_handler,
 };
 
+static int speech_settings_handler(struct http_client_ctx *client, enum http_data_status status,
+				   const struct http_request_ctx *request_ctx,
+				   struct http_response_ctx *response_ctx, void *user_data)
+{
+	static char __noinit response[128];
+	static uint8_t __noinit post_buffer[SPEECH_SETTINGS_POST_BUF_SIZE];
+	static size_t cursor;
+	struct speech_threshold_command cmd = { 0 };
+	const int expected_parse_mask = BIT_MASK(ARRAY_SIZE(speech_threshold_command_descr));
+
+	ARG_UNUSED(user_data);
+
+	if (status == HTTP_SERVER_DATA_ABORTED) {
+		cursor = 0U;
+		return 0;
+	}
+
+	if (cursor > sizeof(post_buffer) ||
+	    request_ctx->data_len > sizeof(post_buffer) - cursor) {
+		cursor = 0U;
+		return send_bad_request(client, response_ctx, response, sizeof(response),
+					"request body too large");
+	}
+
+	if (request_ctx->data_len != 0U) {
+		memcpy(post_buffer + cursor, request_ctx->data, request_ctx->data_len);
+		cursor += request_ctx->data_len;
+	}
+
+	if (status != HTTP_SERVER_DATA_FINAL) {
+		return 0;
+	}
+
+	int ret = json_obj_parse(post_buffer, cursor, speech_threshold_command_descr,
+				 ARRAY_SIZE(speech_threshold_command_descr), &cmd);
+	cursor = 0U;
+	if (ret != expected_parse_mask) {
+		return send_bad_request(client, response_ctx, response, sizeof(response),
+					"expected integer threshold_percent from 50 to 100");
+	}
+	if (cmd.threshold_percent < 50 || cmd.threshold_percent > 100) {
+		return send_bad_request(client, response_ctx, response, sizeof(response),
+					"threshold_percent must be from 50 to 100");
+	}
+
+	ret = speech_service_set_threshold((uint8_t)cmd.threshold_percent);
+	if (ret == -ERANGE) {
+		return send_bad_request(client, response_ctx, response, sizeof(response),
+					"threshold_percent must be from 50 to 100");
+	}
+	if (ret != 0) {
+		return send_internal_error(client, response_ctx, response, sizeof(response));
+	}
+
+	ret = snprintk(response, sizeof(response), "{\"threshold_percent\":%d}",
+		       cmd.threshold_percent);
+	if (ret < 0 || (size_t)ret >= sizeof(response)) {
+		return send_internal_error(client, response_ctx, response, sizeof(response));
+	}
+
+	populate_response(client, response_ctx, HTTP_200_OK, response, (size_t)ret);
+	response_ctx->headers = mouse_response_headers;
+	response_ctx->header_count = ARRAY_SIZE(mouse_response_headers);
+	return 0;
+}
+
+static struct http_resource_detail_dynamic speech_settings_resource_detail = {
+	.common = {
+		.type = HTTP_RESOURCE_TYPE_DYNAMIC,
+		.bitmask_of_supported_http_methods = BIT(HTTP_POST),
+		.content_type = "application/json",
+	},
+	.cb = speech_settings_handler,
+};
+
 static int dashboard_handler(struct http_client_ctx *client, enum http_data_status status,
 			     const struct http_request_ctx *request_ctx,
 			     struct http_response_ctx *response_ctx, void *user_data)
@@ -873,6 +957,8 @@ HTTP_RESOURCE_DEFINE(io_resource, board_http_service, "/api/v1/io", &io_resource
 HTTP_RESOURCE_DEFINE(mouse_resource, board_http_service, "/api/v1/mouse", &mouse_resource_detail);
 HTTP_RESOURCE_DEFINE(mic_resource, board_http_service, "/api/v1/mic", &mic_resource_detail);
 HTTP_RESOURCE_DEFINE(speech_resource, board_http_service, "/api/v1/speech", &speech_resource_detail);
+HTTP_RESOURCE_DEFINE(speech_settings_resource, board_http_service, "/api/v1/speech/settings",
+		     &speech_settings_resource_detail);
 HTTP_RESOURCE_DEFINE(leds_resource, board_http_service, "/api/v1/leds", &leds_resource_detail);
 
 int board_http_server_start(void)
