@@ -787,12 +787,13 @@ Troubleshooting:
 - Not supported: headset speaker output, recording, browser-to-board audio,
   USB hubs.
 
-### Speech AI (English yes/no, on the board)
+### Speech AI (English keywords, on the board)
 
-The **Speech AI** dashboard card recognizes English **yes** and **no** from
-the Logitech H570e microphone on CN13. TensorFlow Lite Micro and the pretrained
-`micro_speech_quantized.tflite` model run inside a dedicated M7 Zephyr thread.
-No training, PC inference, cloud service, or Internet connection is needed.
+The **Speech AI** dashboard card recognizes English **yes, no, up, down, left,
+right** from the Logitech H570e microphone on CN13. TensorFlow Lite Micro runs
+the trained int8 `tiny_conv` model (`models/speech_keywords.tflite`) inside a
+dedicated M7 Zephyr thread. No training during builds, PC inference, cloud
+service, or Internet connection is needed.
 The browser only displays results. Hebrew and general speech transcription
 are not supported.
 
@@ -800,7 +801,7 @@ Recognition starts automatically with a ready microphone. Open
 `http://192.168.55.2/`, speak near the headset microphone, and watch **Detected**.
 The current model class and model score are raw predictions, not accepted
 commands or measured accuracy. By default, acceptance requires a winning
-yes/no score of at least 0.8 over three consecutive 100 ms decisions; repeated
+keyword score of at least 0.8 over three consecutive 100 ms decisions; repeated
 events are suppressed until a non-keyword interval. Use **Detection threshold**
 on the Speech AI card to change the cutoff immediately to an integer from 50%
 through 100%. A cutoff change clears any partial confirmation streak, does
@@ -845,12 +846,47 @@ builds with this standalone SDK, pass `-DTOOLCHAIN_HAS_PICOLIBC=ON` and
 Full Zephyr SDK installations using the `zephyr` variant handle this through
 their own toolchain configuration.
 
+The default is the first extended-word model (v1), not the later room-noise
+experiment. Held-out int8 classification accuracy was 82.55%; this is not a
+continuous-stream false-trigger measurement. Whispered "shhhh", mic contact,
+and other noises can produce accepted commands. Raising the threshold trades
+recall for rejection and is not an established fix. See
+[noise investigation](docs/model_debug.md) and [follow-up tasks](TODO.md).
+
+On NUCLEO-H755ZI-Q, classifier and frontend occupy bank 2 sector 0 at
+`0x08100000` (43,784 bytes in a 128 KiB region). Inference still runs on M7.
+`CONFIG_STM32H7_BOOT_M4_AT_INIT=n` prevents Zephyr from starting M4, but the board
+option byte **BCM4 must also remain 0**. Flashing the generated HEX programs both
+banks and overwrites any M4 image in that sector. Do not enable M4 or deploy
+an M4 image there while this model layout is in use.
+
+Retraining is optional, separate from firmware builds:
+
+```bash
+SPEECH_TRAIN_DIR="$HOME/kws-train-v1-clean" scripts/train_speech_keywords.sh
+```
+
+The script installs TensorFlow 2.15.1 in a separate venv, downloads Speech
+Commands v0.02, trains the stock-noise recipe, and exports a compatible int8
+model. Training is stochastic; a new run need not reproduce the committed
+model's exact hash or accuracy. Dataset download and training require network
+access and substantial disk space/time.
+
 Runtime/model provenance and exact artifact hashes:
 [speech model notes](apps/zephyr-hello-shell/third_party/speech-models/README.md).
 The runtime/glue uses size optimization to fit alongside the existing camera
 and dashboard; the underlying CMSIS-NN library retains speed optimization.
 
-Measured on the NUCLEO-H755ZI-Q on 2026-10-13:
+The integrated v1 direction build uses 96.56% of bank-1 flash and 76.84% RAM,
+with ARM frontend/classifier arena usage 8768/9076 bytes. With the event USB
+worker, speech uses priority 11 (below USB priority 10) so inference cannot
+starve notification draining; polling builds retain speech priority 8.
+Observed inference was about 27 ms with this scheduling. A 60-second microphone
+playback/inference/HTTP trial transferred 11.5 MB, with zero FIFO overflows and
+no new recognition gaps/drops. This validates that workload, not noise rejection.
+
+Historical measurements for the original yes/no model on 2026-10-13
+(not direction-model benchmarks):
 
 - Firmware uses approximately **98% of the configured 1 MiB flash** and
   **76% of 512 KiB RAM**; flash headroom is small.
@@ -882,7 +918,7 @@ Measured on the NUCLEO-H755ZI-Q on 2026-10-13:
 
 Controlled utterance latency, a labeled unrelated-speech false-trigger test,
 full-minute camera coexistence, and a physical mouse swap still need dedicated
-acceptance checks. This small pretrained model is a demo, not a reliable
+acceptance checks. This small model is a demo, not a reliable
 general-purpose voice-command product; noise, accent, and microphone placement
 affect recognition.
 
@@ -896,7 +932,9 @@ NODE_PATH="$HOME/.copilot/skills/browser/node_modules" \
 ```
 
 `--model` builds a separate native_sim fixture application, checks exact
-upstream frontend features and yes/no/silence/noise inference, and exercises
+upstream frontend features and all six keyword fixtures plus noise inference.
+Near-digital-zero silence must not reach the default keyword threshold; it
+need not win the silence class. The suite also exercises
 worker warmup, gap reset, disconnect, and unsupported-format states.
 Fixture audio is test input, not live recognition. The fixture also runs
 on the Cortex-M7 `mps2/an500` QEMU target. In an isolated worktree, set
