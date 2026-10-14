@@ -18,6 +18,18 @@ static const uint8_t silence_audio[] = {
 static const uint8_t noise_audio[] = {
 #include <noise_1000ms.inc>
 };
+static const uint8_t up_audio[] = {
+#include <up_1000ms.inc>
+};
+static const uint8_t down_audio[] = {
+#include <down_1000ms.inc>
+};
+static const uint8_t left_audio[] = {
+#include <left_1000ms.inc>
+};
+static const uint8_t right_audio[] = {
+#include <right_1000ms.inc>
+};
 static const uint8_t yes_feature[] = {
 #include <yes_30ms.inc>
 };
@@ -52,19 +64,39 @@ static void feed_wav(const uint8_t *wav, size_t bytes)
 
 static void classify(const uint8_t *wav, size_t n, int expected)
 {
-	uint16_t scores[4];
+	uint16_t scores[SPEECH_MODEL_LABELS];
 	uint32_t us;
 	assert(speech_model_reset() == 0);
 	feed_wav(wav, n);
 	assert(speech_model_window_ready());
 	assert(speech_model_invoke(scores, &us) == 0);
 	int winner = 0;
-	for (int i = 1; i < 4; ++i) {
+	for (int i = 1; i < SPEECH_MODEL_LABELS; ++i) {
 		if (scores[i] > scores[winner]) { winner = i; }
 	}
-	printf("fixture expected=%d winner=%d scores=%u,%u,%u,%u us=%u\n",
-	       expected, winner, scores[0], scores[1], scores[2], scores[3], us);
+	printf("fixture expected=%d winner=%d scores=", expected, winner);
+	for (int i = 0; i < SPEECH_MODEL_LABELS; ++i) {
+		printf("%s%u", i ? "," : "", scores[i]);
+	}
+	printf(" us=%u\n", us);
 	assert(winner == expected);
+}
+
+/* Near-digital-zero input (peak 7/32767) is outside the training data's quiet
+ * background-noise silence; it must only never reach the keyword trigger. */
+static void assert_no_trigger(const uint8_t *wav, size_t n)
+{
+	uint16_t scores[SPEECH_MODEL_LABELS];
+	uint32_t us;
+	assert(speech_model_reset() == 0);
+	feed_wav(wav, n);
+	assert(speech_model_invoke(scores, &us) == 0);
+	printf("fixture near-zero silence scores=");
+	for (int i = 0; i < SPEECH_MODEL_LABELS; ++i) {
+		printf("%s%u", i ? "," : "", scores[i]);
+		if (i >= SPEECH_YES) { assert(scores[i] < 800); }
+	}
+	printf("\n");
 }
 
 static void test_service(void)
@@ -130,12 +162,16 @@ int main(void)
 	feed_wav(no_feature, sizeof(no_feature));
 	assert(speech_model_latest_feature(feature) == 0);
 	assert(memcmp(feature, no_expected, 40) == 0);
-	classify(yes_audio, sizeof(yes_audio), 2);
-	classify(no_audio, sizeof(no_audio), 3);
-	classify(silence_audio, sizeof(silence_audio), 0);
-	classify(noise_audio, sizeof(noise_audio), 0);
+	classify(yes_audio, sizeof(yes_audio), SPEECH_YES);
+	classify(no_audio, sizeof(no_audio), SPEECH_NO);
+	classify(up_audio, sizeof(up_audio), SPEECH_UP);
+	classify(down_audio, sizeof(down_audio), SPEECH_DOWN);
+	classify(left_audio, sizeof(left_audio), SPEECH_LEFT);
+	classify(right_audio, sizeof(right_audio), SPEECH_RIGHT);
+	assert_no_trigger(silence_audio, sizeof(silence_audio));
+	classify(noise_audio, sizeof(noise_audio), SPEECH_SILENCE);
 	/* Reset must reproduce the initial frontend state. */
-	classify(yes_audio, sizeof(yes_audio), 2);
+	classify(yes_audio, sizeof(yes_audio), SPEECH_YES);
 	printf("PASS: model fixtures; arenas frontend=%zu classifier=%zu\n",
 	       speech_model_arena_used(true), speech_model_arena_used(false));
 	test_service();
