@@ -11,10 +11,10 @@ enum speech_state {
 };
 enum speech_label {
 	SPEECH_SILENCE, SPEECH_UNKNOWN, SPEECH_YES, SPEECH_NO,
-	SPEECH_UP, SPEECH_DOWN, SPEECH_LEFT, SPEECH_RIGHT,
+	SPEECH_UP, SPEECH_DOWN, SPEECH_LEFT, SPEECH_RIGHT, SPEECH_STOP,
 	SPEECH_LABEL_COUNT
 };
-#define SPEECH_WORDS "yes/no/up/down/left/right"
+#define SPEECH_WORDS "yes/no/up/down/left/right/stop"
 struct speech_snapshot {
 	enum speech_state state;
 	const char *reason;

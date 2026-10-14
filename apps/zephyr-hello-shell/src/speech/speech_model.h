@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-/* Classifier output order: silence, unknown, yes, no, up, down, left, right. */
-#define SPEECH_MODEL_LABELS 8
+/* Classifier output order: silence, unknown, yes, no, up, down, left, right, stop. */
+#define SPEECH_MODEL_LABELS 9
 #ifdef __cplusplus
 extern "C" {
 #endif

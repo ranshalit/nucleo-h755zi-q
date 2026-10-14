@@ -23,7 +23,7 @@ int speech_snapshot_json(const struct speech_snapshot *snapshot, char *out, size
 		"unavailable", "initializing", "warming-up", "running", "unsupported-format", "error"
 	};
 	static const char *const labels[SPEECH_LABEL_COUNT] = {
-		"silence", "unknown", "yes", "no", "up", "down", "left", "right"
+		"silence", "unknown", "yes", "no", "up", "down", "left", "right", "stop"
 	};
 	if (!snapshot || !out || !snapshot->reason ||
 	    (unsigned)snapshot->state >= 6 ||

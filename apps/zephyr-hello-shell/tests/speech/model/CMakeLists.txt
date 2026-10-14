@@ -15,7 +15,7 @@ foreach(fixture yes_1000ms no_1000ms silence_1000ms noise_1000ms yes_30ms no_30m
     "${SPEECH_TFLM_DIR}/tensorflow/lite/micro/examples/micro_speech/testdata/${fixture}.wav"
     "${ZEPHYR_BINARY_DIR}/include/generated/${fixture}.inc")
 endforeach()
-foreach(fixture up_1000ms down_1000ms left_1000ms right_1000ms)
+foreach(fixture up_1000ms down_1000ms left_1000ms right_1000ms stop_1000ms)
   generate_inc_file_for_target(app
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/${fixture}.wav"
     "${ZEPHYR_BINARY_DIR}/include/generated/${fixture}.inc")

@@ -34,8 +34,8 @@ int main(void)
 	n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
 	assert(n > 0 && strstr(buffer, "\"threshold_percent\":65"));
 	puts(buffer);
-	static const char *const names[] = {"up", "down", "left", "right"};
-	for (int i = 0; i < 4; ++i) {
+	static const char *const names[] = {"up", "down", "left", "right", "stop"};
+	for (int i = 0; i < 5; ++i) {
 		char expected[64];
 		snapshot.label = (enum speech_label)(SPEECH_UP + i);
 		snapshot.event_label = snapshot.label;
@@ -56,6 +56,6 @@ int main(void)
 	snapshot.score_permille = 910;
 	snapshot.threshold_percent = 49;
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
-	puts("PASS: snapshot JSON thresholds, nulls, escaping, direction labels and overflow");
+	puts("PASS: snapshot JSON thresholds, nulls, escaping, direction/stop labels and overflow");
 	return 0;
 }

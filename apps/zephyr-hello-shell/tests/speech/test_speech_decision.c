@@ -80,6 +80,19 @@ int main(void)
 	assert(!speech_decision_update(&decision, at_threshold, 300, &event));
 	assert(speech_decision_update(&decision, at_threshold, 400, &event));
 	assert(event == SPEECH_YES);
+	{
+		struct speech_decision d;
+		enum speech_label ev = SPEECH_SILENCE;
+		uint16_t s[SPEECH_LABEL_COUNT] = {0};
+		speech_decision_reset(&d);
+		s[SPEECH_STOP] = 950;
+		bool fired = false;
+		for (int64_t t = 0; t <= 400 && !fired; t += 100) {
+			fired = speech_decision_update(&d, s, t, &ev);
+		}
+		assert(fired && ev == SPEECH_STOP);
+		puts("PASS: stop is an accepted keyword");
+	}
 	puts("PASS: configurable thresholds, cadence, quiet rearm, ties and direction labels");
 	return 0;
 }

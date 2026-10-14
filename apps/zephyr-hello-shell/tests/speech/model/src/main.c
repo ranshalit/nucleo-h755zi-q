@@ -30,6 +30,9 @@ static const uint8_t left_audio[] = {
 static const uint8_t right_audio[] = {
 #include <right_1000ms.inc>
 };
+static const uint8_t stop_audio[] = {
+#include <stop_1000ms.inc>
+};
 static const uint8_t yes_feature[] = {
 #include <yes_30ms.inc>
 };
@@ -174,6 +177,7 @@ int main(void)
 	classify(down_audio, sizeof(down_audio), SPEECH_DOWN);
 	classify(left_audio, sizeof(left_audio), SPEECH_LEFT);
 	classify(right_audio, sizeof(right_audio), SPEECH_RIGHT);
+	classify(stop_audio, sizeof(stop_audio), SPEECH_STOP);
 	assert_no_trigger(silence_audio, sizeof(silence_audio));
 	classify(noise_audio, sizeof(noise_audio), SPEECH_SILENCE);
 	/* Reset must reproduce the initial frontend state. */
