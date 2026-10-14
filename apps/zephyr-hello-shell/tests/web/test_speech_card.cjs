@@ -39,7 +39,7 @@ async function main() {
     await waitText('speech-state', 'unavailable');
     speech = {...speech, state: 'warming-up', reason: 'collecting audio'};
     await waitText('speech-state', 'warming-up');
-    speech = {state: 'running', reason: 'recognizing English yes/no', label: 'yes', score: .91,
+    speech = {state: 'running', reason: 'recognizing English yes/no/up/down/left/right', label: 'yes', score: .91,
       last_event: {label: 'yes', sequence: 1, uptime_ms: 12000},
       session: 3, inference_us: 1500, max_processing_us: 2400, windows: 3, gaps: 0, drops: 0};
     await waitText('speech-label', 'yes');
@@ -57,6 +57,12 @@ async function main() {
     speech.label = 'no';
     await waitText('speech-event', 'Detected: no');
     assert.equal(await page.evaluate(() => window.speechHighlights), 1);
+    speech.last_event = {label: 'left', sequence: 3, uptime_ms: 16000};
+    speech.label = 'left';
+    await waitText('speech-label', 'left');
+    await waitText('speech-event', 'Detected: left');
+    assert.equal(await page.evaluate(() => window.speechHighlights), 2);
+    assert.match(await page.evaluate(() => document.body.textContent), /yes, no, up, down, left, right/);
     speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
     await waitText('speech-label', '--');
     await waitText('speech-event', 'No accepted keyword');
@@ -65,7 +71,7 @@ async function main() {
     failSpeech = false;
     await waitText('speech-state', 'unavailable');
     assert.equal(ledRequests, 0, 'speech changed LED state');
-    console.log('PASS: speech card states, events, polling failure and unchanged LEDs');
+    console.log('PASS: speech card states, events, direction labels, polling failure and unchanged LEDs');
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));

@@ -3,18 +3,29 @@
 #include <cerrno>
 #include <cstring>
 #include <new>
+#include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
+#include "tensorflow/lite/micro/kernels/conv.h"
+#include "tensorflow/lite/micro/kernels/fully_connected.h"
+#include "tensorflow/lite/micro/kernels/softmax.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 
+#if DT_NODE_EXISTS(DT_NODELABEL(speech_model_flash))
+#define SPEECH_MODEL_DATA __attribute__((section(".speech_model_bank2"), used))
+#else
+#define SPEECH_MODEL_DATA
+#endif
+
 namespace {
-alignas(16) const unsigned char classifier_data[] = {
-#include <micro_speech_quantized.inc>
+alignas(16) SPEECH_MODEL_DATA const unsigned char classifier_data[] = {
+#include <speech_keywords.inc>
 };
-alignas(16) const unsigned char frontend_data[] = {
+alignas(16) SPEECH_MODEL_DATA const unsigned char frontend_data[] = {
 #include <audio_preprocessor_int8.inc>
 };
 constexpr size_t arena_size = 16384;
+constexpr size_t label_count = SPEECH_MODEL_LABELS;
 alignas(16) uint8_t frontend_arena[arena_size];
 alignas(16) uint8_t classifier_arena[arena_size];
 tflite::MicroMutableOpResolver<18> frontend_ops;
@@ -34,10 +45,13 @@ int register_ops()
 {
 #define ADD(resolver, name) \
 	do { if (resolver.Add##name() != kTfLiteOk) { return -EINVAL; } } while (0)
+#define ADD_KERNEL(resolver, name, kernel) \
+	do { if (resolver.Add##name(kernel) != kTfLiteOk) { return -EINVAL; } } while (0)
+	/* int8-only kernels keep unused int4/int16 CMSIS-NN variants out of flash. */
 	ADD(classifier_ops, Reshape);
-	ADD(classifier_ops, FullyConnected);
-	ADD(classifier_ops, DepthwiseConv2D);
-	ADD(classifier_ops, Softmax);
+	ADD_KERNEL(classifier_ops, FullyConnected, tflite::Register_FULLY_CONNECTED_INT8());
+	ADD_KERNEL(classifier_ops, Conv2D, tflite::Register_CONV_2D_INT8());
+	ADD_KERNEL(classifier_ops, Softmax, tflite::Register_SOFTMAX_INT8());
 	ADD(frontend_ops, Reshape);
 	ADD(frontend_ops, Cast);
 	ADD(frontend_ops, StridedSlice);
@@ -56,6 +70,7 @@ int register_ops()
 	ADD(frontend_ops, FilterBankSpectralSubtraction);
 	ADD(frontend_ops, PCAN);
 	ADD(frontend_ops, FilterBankLog);
+#undef ADD_KERNEL
 #undef ADD
 	return 0;
 }
@@ -89,7 +104,7 @@ int speech_model_init(void)
 		model, classifier_ops, classifier_arena, sizeof(classifier_arena));
 	if (classifier->AllocateTensors() != kTfLiteOk) { return -ENOMEM; }
 	if (!tensor_matches(classifier->input(0), kTfLiteInt8, 1960) ||
-	    !tensor_matches(classifier->output(0), kTfLiteInt8, 4) ||
+	    !tensor_matches(classifier->output(0), kTfLiteInt8, label_count) ||
 	    classifier->output(0)->params.scale <= 0) { return -EINVAL; }
 	int ret = speech_model_reset();
 	initialized = ret == 0;
@@ -147,7 +162,7 @@ int speech_model_latest_feature(int8_t out[40])
 	return 0;
 }
 
-int speech_model_invoke(uint16_t scores[4], uint32_t *duration_us)
+int speech_model_invoke(uint16_t scores[label_count], uint32_t *duration_us)
 {
 	if (!scores || !duration_us || !classifier) { return -EINVAL; }
 	if (!speech_model_window_ready()) { return -EAGAIN; }
@@ -156,7 +171,7 @@ int speech_model_invoke(uint16_t scores[4], uint32_t *duration_us)
 	if (classifier->Invoke() != kTfLiteOk) { return -EIO; }
 	*duration_us = k_cyc_to_us_floor32(k_cycle_get_32() - start);
 	const auto *output = classifier->output(0);
-	for (int i = 0; i < 4; ++i) {
+	for (size_t i = 0; i < label_count; ++i) {
 		int score = static_cast<int>((output->data.int8[i] - output->params.zero_point) *
 					    output->params.scale * 1000.0f + 0.5f);
 		scores[i] = static_cast<uint16_t>(MAX(0, MIN(1000, score)));

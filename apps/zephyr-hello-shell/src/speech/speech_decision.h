@@ -11,6 +11,6 @@ struct speech_decision {
 	int64_t last_update;
 };
 void speech_decision_reset(struct speech_decision *decision);
-bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[4],
+bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[SPEECH_LABEL_COUNT],
 			    int64_t uptime_ms, enum speech_label *event);
 #endif

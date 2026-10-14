@@ -6,8 +6,8 @@ int main(void)
 {
 	struct speech_decision decision;
 	enum speech_label event;
-	uint16_t yes[4] = {0,50,900,50}, no[4] = {0,50,50,900};
-	uint16_t quiet[4] = {900,50,25,25}, weak[4] = {0,300,700,0};
+	uint16_t yes[SPEECH_LABEL_COUNT] = {0,50,900,50}, no[SPEECH_LABEL_COUNT] = {0,50,50,900};
+	uint16_t quiet[SPEECH_LABEL_COUNT] = {900,50,25,25}, weak[SPEECH_LABEL_COUNT] = {0,300,700,0};
 	speech_decision_reset(&decision);
 	assert(!speech_decision_update(&decision, weak, 0, &event));
 	assert(!speech_decision_update(&decision, yes, 100, &event));
@@ -29,11 +29,26 @@ int main(void)
 	assert(!speech_decision_update(&decision, yes, 2700, &event));
 	assert(!speech_decision_update(&decision, yes, 2800, &event));
 	assert(speech_decision_update(&decision, yes, 2900, &event));
-	uint16_t tie[4] = {0,0,850,850};
+	uint16_t tie[SPEECH_LABEL_COUNT] = {0,0,850,850};
 	speech_decision_reset(&decision);
 	for (int64_t t = 0; t < 1000; t += 100) {
 		assert(!speech_decision_update(&decision, tie, t, &event));
 	}
-	puts("PASS: decision thresholds, cadence, quiet rearm, ties and reset");
+	static const enum speech_label directions[] = {SPEECH_UP, SPEECH_DOWN, SPEECH_LEFT, SPEECH_RIGHT};
+	for (size_t i = 0; i < sizeof(directions) / sizeof(directions[0]); ++i) {
+		uint16_t scores[SPEECH_LABEL_COUNT] = {0, 50};
+		scores[directions[i]] = 900;
+		speech_decision_reset(&decision);
+		assert(!speech_decision_update(&decision, scores, 0, &event));
+		assert(!speech_decision_update(&decision, scores, 100, &event));
+		assert(speech_decision_update(&decision, scores, 200, &event));
+		assert(event == directions[i]);
+	}
+	uint16_t weak_up[SPEECH_LABEL_COUNT] = {0, 300, 0, 0, 700};
+	speech_decision_reset(&decision);
+	for (int64_t t = 0; t < 1000; t += 100) {
+		assert(!speech_decision_update(&decision, weak_up, t, &event));
+	}
+	puts("PASS: decision thresholds, cadence, quiet rearm, ties, reset and direction labels");
 	return 0;
 }

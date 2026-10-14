@@ -9,7 +9,12 @@ enum speech_state {
 	SPEECH_UNAVAILABLE, SPEECH_INITIALIZING, SPEECH_WARMING_UP,
 	SPEECH_RUNNING, SPEECH_UNSUPPORTED_FORMAT, SPEECH_ERROR
 };
-enum speech_label { SPEECH_SILENCE, SPEECH_UNKNOWN, SPEECH_YES, SPEECH_NO };
+enum speech_label {
+	SPEECH_SILENCE, SPEECH_UNKNOWN, SPEECH_YES, SPEECH_NO,
+	SPEECH_UP, SPEECH_DOWN, SPEECH_LEFT, SPEECH_RIGHT,
+	SPEECH_LABEL_COUNT
+};
+#define SPEECH_WORDS "yes/no/up/down/left/right"
 struct speech_snapshot {
 	enum speech_state state;
 	const char *reason;

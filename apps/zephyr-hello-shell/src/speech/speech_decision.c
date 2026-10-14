@@ -9,14 +9,14 @@ void speech_decision_reset(struct speech_decision *decision)
 	decision->last_event = -1000;
 	decision->last_update = -100;
 }
-bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[4],
+bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[SPEECH_LABEL_COUNT],
 			    int64_t uptime_ms, enum speech_label *event)
 {
 	if (uptime_ms - decision->last_update < 100) { return false; }
 	decision->last_update = uptime_ms;
 	unsigned int winner = 0;
 	bool tie = false;
-	for (unsigned int i = 1; i < 4; ++i) {
+	for (unsigned int i = 1; i < SPEECH_LABEL_COUNT; ++i) {
 		if (scores[i] > scores[winner]) { winner = i; tie = false; }
 		else if (scores[i] == scores[winner]) { tie = true; }
 	}

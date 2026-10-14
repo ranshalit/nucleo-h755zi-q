@@ -17,3 +17,15 @@
 &die_temp {
 	status = "okay";
 };
+
+/*
+ * Flash bank 2 sector 0 (normally the CM4 image) holds the read-only speech
+ * models. The CM4 is unused: keep BCM4=0 and CONFIG_STM32H7_BOOT_M4_AT_INIT=n.
+ */
+/ {
+	speech_model_flash: memory@8100000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x08100000 DT_SIZE_K(128)>;
+		zephyr,memory-region = "SPEECH_BANK2";
+	};
+};

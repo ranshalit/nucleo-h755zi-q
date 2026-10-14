@@ -12,6 +12,7 @@ static struct speech_snapshot status = {
 #include "speech_audio.h"
 #include "speech_decision.h"
 #include "speech_model.h"
+BUILD_ASSERT(SPEECH_MODEL_LABELS == SPEECH_LABEL_COUNT, "model/label mismatch");
 static struct speech_audio_queue queue;
 static struct speech_decimator decimator;
 static struct speech_decision decision;
@@ -117,7 +118,7 @@ static void run_worker(void *a, void *b, void *c)
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
 	int ret = speech_model_init();
 	if (ret) { model_error(ret); return; }
-	printk("speech: English yes/no model ready; arenas frontend=%u classifier=%u\n",
+	printk("speech: English keyword model (" SPEECH_WORDS ") ready; arenas frontend=%u classifier=%u\n",
 		(unsigned)speech_model_arena_used(true), (unsigned)speech_model_arena_used(false));
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	model_ready = true;
@@ -159,7 +160,7 @@ static void run_worker(void *a, void *b, void *c)
 			if (ret) { model_error(ret); return; }
 			since_inference += samples;
 			bool infer = speech_model_window_ready() && since_inference >= 1600;
-			uint16_t scores[4];
+			uint16_t scores[SPEECH_LABEL_COUNT];
 			uint32_t inference_us = 0;
 			enum speech_label event = SPEECH_UNKNOWN;
 			bool accepted = false;
@@ -168,7 +169,7 @@ static void run_worker(void *a, void *b, void *c)
 				since_inference %= 1600;
 				ret = speech_model_invoke(scores, &inference_us);
 				if (ret) { model_error(ret); return; }
-				for (unsigned int i = 1; i < 4; ++i) {
+				for (unsigned int i = 1; i < SPEECH_LABEL_COUNT; ++i) {
 					if (scores[i] > scores[winner]) { winner = i; }
 				}
 				accepted = speech_decision_update(&decision, scores, k_uptime_get(), &event);
@@ -180,7 +181,7 @@ static void run_worker(void *a, void *b, void *c)
 				if (processing_us > status.max_processing_us) { status.max_processing_us = processing_us; }
 				if (infer) {
 					status.state = SPEECH_RUNNING;
-					status.reason = "recognizing English yes/no";
+					status.reason = "recognizing English " SPEECH_WORDS;
 					status.prediction_valid = true;
 					status.label = (enum speech_label)winner;
 					status.score_permille = scores[winner];
@@ -207,7 +208,7 @@ int speech_service_start(void)
 	started = true;
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	status.state = SPEECH_INITIALIZING;
-	status.reason = "initializing English yes/no model";
+	status.reason = "initializing English keyword model";
 	k_spin_unlock(&lock, key);
 	k_tid_t tid = k_thread_create(&worker, worker_stack, K_THREAD_STACK_SIZEOF(worker_stack),
 				     run_worker, NULL, NULL, NULL, 8, 0, K_NO_WAIT);
@@ -248,4 +249,4 @@ static int cmd_speech_status(const struct shell *shell, size_t argc, char **argv
 SHELL_STATIC_SUBCMD_SET_CREATE(speech_commands,
 	SHELL_CMD(status, NULL, "Speech recognition status and timing", cmd_speech_status),
 	SHELL_SUBCMD_SET_END);
-SHELL_CMD_REGISTER(speech, &speech_commands, "On-board English yes/no recognition", NULL);
+SHELL_CMD_REGISTER(speech, &speech_commands, "On-board English keyword recognition (" SPEECH_WORDS ")", NULL);

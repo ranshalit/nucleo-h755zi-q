@@ -15,11 +15,16 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set_source_files_properties("${SPEECH_APP_ROOT}/src/speech/speech_model.cc"
     PROPERTIES COMPILE_OPTIONS -Os)
 endif()
-foreach(model micro_speech_quantized audio_preprocessor_int8)
-  generate_inc_file_for_target(app
-    "${SPEECH_TFLM_DIR}/tensorflow/lite/micro/examples/micro_speech/models/${model}.tflite"
-    "${ZEPHYR_BINARY_DIR}/include/generated/${model}.inc")
-endforeach()
+generate_inc_file_for_target(app
+  "${SPEECH_APP_ROOT}/models/speech_keywords.tflite"
+  "${ZEPHYR_BINARY_DIR}/include/generated/speech_keywords.inc")
+generate_inc_file_for_target(app
+  "${SPEECH_TFLM_DIR}/tensorflow/lite/micro/examples/micro_speech/models/audio_preprocessor_int8.tflite"
+  "${ZEPHYR_BINARY_DIR}/include/generated/audio_preprocessor_int8.inc")
+dt_nodelabel(speech_model_flash_path NODELABEL speech_model_flash)
+if(speech_model_flash_path)
+  zephyr_linker_sources(SECTIONS "${SPEECH_APP_ROOT}/cmake/speech_bank2.ld")
+endif()
 
 # Zephyr's module already supplies window/RFFT kernels and implementations.
 set(speech_signal_kernels
