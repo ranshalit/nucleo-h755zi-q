@@ -1,0 +1,4 @@
+source "Kconfig.zephyr"
+config APP_SPEECH_AI
+	bool
+	default y

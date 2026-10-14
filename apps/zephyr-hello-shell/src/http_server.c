@@ -26,6 +26,7 @@
 #include "usb_audio_capture.h"
 #include "usb_boot_mouse.h"
 #include "web_assets.h"
+#include "speech_service.h"
 
 #define JSON_RESPONSE_BUF_SIZE 1024
 #define DASHBOARD_RESPONSE_BUF_SIZE 2048
@@ -694,6 +695,35 @@ static struct http_resource_detail_dynamic mic_resource_detail = {
 	.cb = mic_handler,
 };
 
+static int speech_handler(struct http_client_ctx *client, enum http_data_status status,
+			  const struct http_request_ctx *request_ctx,
+			  struct http_response_ctx *response_ctx, void *user_data)
+{
+	static char __noinit response[768];
+	struct speech_snapshot snapshot;
+	ARG_UNUSED(request_ctx);
+	ARG_UNUSED(user_data);
+	if (status != HTTP_SERVER_DATA_FINAL) { return 0; }
+	speech_snapshot_get(&snapshot);
+	int ret = speech_snapshot_json(&snapshot, response, sizeof(response));
+	if (ret < 0) {
+		return send_internal_error(client, response_ctx, response, sizeof(response));
+	}
+	populate_response(client, response_ctx, HTTP_200_OK, response, (size_t)ret);
+	response_ctx->headers = mouse_response_headers;
+	response_ctx->header_count = ARRAY_SIZE(mouse_response_headers);
+	return 0;
+}
+
+static struct http_resource_detail_dynamic speech_resource_detail = {
+	.common = {
+		.type = HTTP_RESOURCE_TYPE_DYNAMIC,
+		.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+		.content_type = "application/json",
+	},
+	.cb = speech_handler,
+};
+
 static int dashboard_handler(struct http_client_ctx *client, enum http_data_status status,
 			     const struct http_request_ctx *request_ctx,
 			     struct http_response_ctx *response_ctx, void *user_data)
@@ -842,6 +872,7 @@ HTTP_RESOURCE_DEFINE(status_resource, board_http_service, "/api/v1/status", &sta
 HTTP_RESOURCE_DEFINE(io_resource, board_http_service, "/api/v1/io", &io_resource_detail);
 HTTP_RESOURCE_DEFINE(mouse_resource, board_http_service, "/api/v1/mouse", &mouse_resource_detail);
 HTTP_RESOURCE_DEFINE(mic_resource, board_http_service, "/api/v1/mic", &mic_resource_detail);
+HTTP_RESOURCE_DEFINE(speech_resource, board_http_service, "/api/v1/speech", &speech_resource_detail);
 HTTP_RESOURCE_DEFINE(leds_resource, board_http_service, "/api/v1/leds", &leds_resource_detail);
 
 int board_http_server_start(void)

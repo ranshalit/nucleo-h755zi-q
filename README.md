@@ -777,6 +777,111 @@ Troubleshooting:
 - Not supported: headset speaker output, recording, browser-to-board audio,
   USB hubs.
 
+### Speech AI (English yes/no, on the board)
+
+The **Speech AI** dashboard card recognizes English **yes** and **no** from
+the Logitech H570e microphone on CN13. TensorFlow Lite Micro and the pretrained
+`micro_speech_quantized.tflite` model run inside a dedicated M7 Zephyr thread.
+No training, PC inference, cloud service, or Internet connection is needed.
+The browser only displays results. Hebrew and general speech transcription
+are not supported.
+
+Recognition starts automatically with a ready microphone. Open
+`http://192.168.55.2/`, speak near the headset microphone, and watch **Detected**.
+The current model class and model score are raw predictions, not accepted
+commands or measured accuracy. Acceptance requires a winning yes/no score
+of at least 0.8 over three consecutive 100 ms decisions; repeated events
+are suppressed until a non-keyword interval. All LEDs keep their existing
+behavior. **Start listening** remains optional and works independently.
+
+Capture remains 48 kHz stereo 16-bit. A separate bounded queue feeds the
+recognizer without consuming the browser playback ring. The left channel
+is low-pass filtered (63-tap FIR, 6 kHz cutoff) and decimated to 16 kHz.
+The measured headset channels matched in a room-noise sample. The pinned
+upstream frontend uses 30 ms windows, 20 ms stride, and 49 x 40 features.
+Other microphone formats remain available to existing capture/playback
+but report unsupported format for speech recognition.
+
+`GET /api/v1/speech` returns state/reason, nullable current label/model score,
+nullable last accepted event (label, sequence, board uptime), inference and
+processing times, processed-window count, capture session, audio gaps, and
+dropped recognition frames. UART command `speech status` shows the same
+diagnostics. Unplug, input gaps, or queue overflow clear current predictions
+and last event, reset frontend history, and warm up on new contiguous audio.
+The normal native_sim/QEMU application reports speech unavailable; it does
+not pretend to recognize host or simulated microphone audio.
+
+Initialize the pinned dependency before a board build:
+
+```bash
+git submodule update --init --recursive apps/zephyr-hello-shell/third_party/tflite-micro
+scripts/flash_zephyr_hello_shell.sh --build-only
+```
+
+The flash script detects the standalone Zephyr SDK's Picolibc and enables
+its thread-local storage support when using the `cross-compile` variant.
+This is required by the full C++ runtime; a generic cross-toolchain setting
+alone does not tell Zephyr which libc is installed. For equivalent manual
+builds with this standalone SDK, pass `-DTOOLCHAIN_HAS_PICOLIBC=ON` and
+`-DCONFIG_TOOLCHAIN_CROSS_COMPILE_SUPPORTS_THREAD_LOCAL_STORAGE=y`.
+Full Zephyr SDK installations using the `zephyr` variant handle this through
+their own toolchain configuration.
+
+Runtime/model provenance and exact artifact hashes:
+[speech model notes](apps/zephyr-hello-shell/third_party/speech-models/README.md).
+The runtime/glue uses size optimization to fit alongside the existing camera
+and dashboard; the underlying CMSIS-NN library retains speed optimization.
+
+Measured on the NUCLEO-H755ZI-Q on 2026-10-13:
+
+- Firmware uses approximately **98% of the configured 1 MiB flash** and
+  **76% of 512 KiB RAM**; flash headroom is small.
+- Frontend arena used 8768 bytes; classifier arena used 6948 bytes.
+  Each reserves 16 KiB. Inference thread peak stack use in one shell snapshot
+  was 2696/8192 bytes.
+- Typical observed classifier inference was about **15–21 ms**; a longer
+  live-dashboard recording observed up to 32.5 ms. Whole processing chunks
+  can take longer under network load.
+- One `kernel thread list` snapshot reported speech **25%**, USB polling
+  **67%**. These are cumulative shares, not a fresh utilization interval.
+  `cpu usage 5000` still reported 100% busy because the unchanged low-priority
+  USB poll loop busy-waits; inference preempts it.
+- The user reported **9/10 yes and 9/10 no** in a spoken trial. The local
+  event recording did not cover the entire user trial, so this is a user
+  observation, not an independently scored accuracy benchmark.
+- A 60-second microphone/browser playback run transferred about 11.6 MB,
+  with no new accepted keywords, no recognition queue drops, no audio gaps,
+  and no new USB errors/missed frames. Dashboard responses took at most
+  14 ms. The room had ambient noise; this was not a controlled silence or
+  unrelated-speech benchmark.
+- Camera image, microphone playback, and speech were observed working
+  together in a separate 10-second browser check. A longer all-three browser
+  check was interrupted; full-duration coexistence remains unverified.
+- Physical disconnect/reconnect cleared stale speech state and resumed
+  recognition on a new capture session.
+
+Controlled utterance latency, a labeled unrelated-speech false-trigger test,
+full-minute camera coexistence, and a physical mouse swap still need dedicated
+acceptance checks. This small pretrained model is a demo, not a reliable
+general-purpose voice-command product; noise, accent, and microphone placement
+affect recognition.
+
+Focused tests:
+
+```bash
+scripts/test_zephyr_speech.sh
+ZEPHYR_BASE="$PWD/vendor/zephyrproject/zephyr" scripts/test_zephyr_speech.sh --model
+NODE_PATH="$HOME/.copilot/skills/browser/node_modules" \
+  node apps/zephyr-hello-shell/tests/web/test_speech_card.cjs
+```
+
+`--model` builds a separate native_sim fixture application, checks exact
+upstream frontend features and yes/no/silence/noise inference, and exercises
+worker warmup, gap reset, disconnect, and unsupported-format states.
+Fixture audio is test input, not live recognition. The fixture also runs
+on the Cortex-M7 `mps2/an500` QEMU target. In an isolated worktree, set
+`ZEPHYR_BASE` to the shared Zephyr source path for builds.
+
 ## STM32CubeIDE reference build
 
 The verified STM32Cube reference baseline is vendored under:

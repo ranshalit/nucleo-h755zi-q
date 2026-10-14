@@ -14,6 +14,7 @@
 #include "audio_stream.h"
 #include "camera_stream.h"
 #include "http_server.h"
+#include "speech_service.h"
 
 extern int board_usb_host_start(void);
 
@@ -281,6 +282,11 @@ int main(void)
 		printf("USB host startup failed: %d\n", ret);
 #endif
 		/* Non-fatal: continue running LEDs/HTTP even if USB host init failed. */
+	}
+
+	ret = speech_service_start();
+	if (ret != 0 && ret != -ENOTSUP) {
+		printf("Speech recognition startup failed: %d\n", ret);
 	}
 
 	ret = camera_stream_start();

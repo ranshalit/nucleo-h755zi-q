@@ -55,9 +55,17 @@ if(extra_dtc_overlay_file)
   set(DTC_OVERLAY_FILE "${extra_dtc_overlay_file}" CACHE STRING "" FORCE)
 endif()
 
+set(SPEECH_TFLM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tflite-micro")
+if(BOARD STREQUAL "nucleo_h755zi_q/stm32h755xx/m7")
+  list(APPEND ZEPHYR_EXTRA_MODULES "${SPEECH_TFLM_DIR}")
+endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_hello_shell)
 
+if(CONFIG_APP_SPEECH_AI)
+  include(cmake/speech_model.cmake)
+  target_sources(app PRIVATE src/speech/speech_audio.c src/speech/speech_decision.c)
+endif()
 if(extra_conf_file)
   include(cmake/patch_stm32_hcd.cmake)
 endif()
@@ -82,12 +90,15 @@ target_sources(app PRIVATE
   src/camera_stream.c
   src/audio_wire.c
   src/audio_stream.c
+  src/speech/speech_service.c
+  src/speech/speech_json.c
   src/usb_host/usb_boot_mouse_report.c
   ${board_sources}
 )
 
 target_include_directories(app PRIVATE
   src/usb_host
+  src/speech
   ${board_include_dirs}
 )
 
