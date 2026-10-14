@@ -4,10 +4,17 @@
 void speech_decision_reset(struct speech_decision *decision)
 {
 	memset(decision, 0, sizeof(*decision));
+	decision->threshold_permille = 800;
 	decision->armed = true;
 	decision->quiet_since = -1;
 	decision->last_event = -1000;
 	decision->last_update = -100;
+}
+void speech_decision_set_threshold(struct speech_decision *decision, uint16_t threshold_permille)
+{
+	if (decision->threshold_permille == threshold_permille) { return; }
+	decision->threshold_permille = threshold_permille;
+	decision->count = 0;
 }
 bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[SPEECH_LABEL_COUNT],
 			    int64_t uptime_ms, enum speech_label *event)
@@ -20,7 +27,8 @@ bool speech_decision_update(struct speech_decision *decision, const uint16_t sco
 		if (scores[i] > scores[winner]) { winner = i; tie = false; }
 		else if (scores[i] == scores[winner]) { tie = true; }
 	}
-	bool keyword = !tie && winner >= SPEECH_YES && scores[winner] >= 800;
+	bool keyword = !tie && winner >= SPEECH_YES &&
+		       scores[winner] >= decision->threshold_permille;
 	if (!keyword) {
 		decision->count = 0;
 		if (decision->quiet_since < 0) { decision->quiet_since = uptime_ms; }

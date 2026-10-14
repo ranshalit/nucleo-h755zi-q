@@ -32,8 +32,10 @@ struct speech_snapshot {
 	uint32_t gaps;
 	uint32_t drops;
 	uint32_t session;
+	uint8_t threshold_percent;
 };
 int speech_service_start(void);
+int speech_service_set_threshold(uint8_t threshold_percent);
 void speech_capture_push(const struct usb_audio_snapshot *capture,
 			 const uint8_t *pcm, size_t bytes);
 void speech_capture_changed(const struct usb_audio_snapshot *capture);

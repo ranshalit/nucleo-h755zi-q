@@ -27,6 +27,7 @@ int speech_snapshot_json(const struct speech_snapshot *snapshot, char *out, size
 	};
 	if (!snapshot || !out || !snapshot->reason ||
 	    (unsigned)snapshot->state >= 6 ||
+	    snapshot->threshold_percent < 50 || snapshot->threshold_percent > 100 ||
 	    (snapshot->prediction_valid && ((unsigned)snapshot->label >= SPEECH_LABEL_COUNT || snapshot->score_permille > 1000)) ||
 	    (snapshot->event_valid && (snapshot->event_label < SPEECH_YES || snapshot->event_label >= SPEECH_LABEL_COUNT))) {
 		return -EINVAL;
@@ -51,9 +52,10 @@ int speech_snapshot_json(const struct speech_snapshot *snapshot, char *out, size
 		     labels[snapshot->event_label], snapshot->event_sequence,
 		     (long long)snapshot->event_uptime_ms);
 	} else { EMIT("null"); }
-	EMIT(",\"inference_us\":%u,\"processing_us\":%u,\"max_processing_us\":%u,"
+	EMIT(",\"threshold_percent\":%u,\"inference_us\":%u,\"processing_us\":%u,\"max_processing_us\":%u,"
 	     "\"windows\":%u,\"gaps\":%u,\"drops\":%u,\"session\":%u}",
-	     snapshot->inference_us, snapshot->processing_us, snapshot->max_processing_us,
+	     snapshot->threshold_percent, snapshot->inference_us, snapshot->processing_us,
+	     snapshot->max_processing_us,
 	     snapshot->windows, snapshot->gaps, snapshot->drops, snapshot->session);
 #undef EMIT
 	return (int)offset;

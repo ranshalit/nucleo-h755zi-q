@@ -8,12 +8,13 @@ int main(void)
 {
 	char buffer[1024];
 	struct speech_snapshot snapshot = {
-		.state = SPEECH_UNAVAILABLE, .reason = "mic \"gone\"\n"
+		.state = SPEECH_UNAVAILABLE, .reason = "mic \"gone\"\n", .threshold_percent = 80
 	};
 	int n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
 	assert(n > 0 && (size_t)n == strlen(buffer));
 	assert(strstr(buffer, "\"label\":null,\"score\":null"));
 	assert(strstr(buffer, "\"last_event\":null"));
+	assert(strstr(buffer, "\"threshold_percent\":80"));
 	assert(strstr(buffer, "mic \\\"gone\\\"\\u000a"));
 	assert(speech_snapshot_json(&snapshot, buffer, 10) == -ENOSPC);
 	snapshot.state = SPEECH_RUNNING;
@@ -29,6 +30,9 @@ int main(void)
 	assert(n > 0);
 	assert(strstr(buffer, "\"label\":\"yes\",\"score\":0.910"));
 	assert(strstr(buffer, "\"last_event\":{\"label\":\"no\",\"sequence\":7,\"uptime_ms\":5000000000}"));
+	snapshot.threshold_percent = 65;
+	n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
+	assert(n > 0 && strstr(buffer, "\"threshold_percent\":65"));
 	puts(buffer);
 	static const char *const names[] = {"up", "down", "left", "right"};
 	for (int i = 0; i < 4; ++i) {
@@ -49,6 +53,9 @@ int main(void)
 	snapshot.event_label = SPEECH_NO;
 	snapshot.score_permille = 1001;
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
-	puts("PASS: snapshot JSON nulls, escaping, score, uptime, direction labels and overflow");
+	snapshot.score_permille = 910;
+	snapshot.threshold_percent = 49;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	puts("PASS: snapshot JSON thresholds, nulls, escaping, direction labels and overflow");
 	return 0;
 }

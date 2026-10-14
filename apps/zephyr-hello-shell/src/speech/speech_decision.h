@@ -3,6 +3,7 @@
 #define APP_SPEECH_DECISION_H
 #include "speech_service.h"
 struct speech_decision {
+	uint16_t threshold_permille;
 	enum speech_label candidate;
 	unsigned int count;
 	bool armed;
@@ -11,6 +12,7 @@ struct speech_decision {
 	int64_t last_update;
 };
 void speech_decision_reset(struct speech_decision *decision);
+void speech_decision_set_threshold(struct speech_decision *decision, uint16_t threshold_permille);
 bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[SPEECH_LABEL_COUNT],
 			    int64_t uptime_ms, enum speech_label *event);
 #endif

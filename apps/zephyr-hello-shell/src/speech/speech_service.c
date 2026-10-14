@@ -5,7 +5,8 @@
 #include <zephyr/shell/shell.h>
 static struct k_spinlock lock;
 static struct speech_snapshot status = {
-	.state = SPEECH_UNAVAILABLE, .reason = "speech recognition unavailable in simulation"
+	.state = SPEECH_UNAVAILABLE, .reason = "speech recognition unavailable in simulation",
+	.threshold_percent = 80
 };
 
 #ifdef CONFIG_APP_SPEECH_AI
@@ -147,7 +148,11 @@ static void run_worker(void *a, void *b, void *c)
 			k_spin_unlock(&lock, key);
 			if (generation != active_generation) {
 				speech_decimator_reset(&decimator);
+				key = k_spin_lock(&lock);
 				speech_decision_reset(&decision);
+				speech_decision_set_threshold(&decision,
+							      (uint16_t)status.threshold_percent * 10U);
+				k_spin_unlock(&lock, key);
 				ret = speech_model_reset();
 				if (ret) { model_error(ret); return; }
 				active_generation = generation;
@@ -172,7 +177,6 @@ static void run_worker(void *a, void *b, void *c)
 				for (unsigned int i = 1; i < SPEECH_LABEL_COUNT; ++i) {
 					if (scores[i] > scores[winner]) { winner = i; }
 				}
-				accepted = speech_decision_update(&decision, scores, k_uptime_get(), &event);
 			}
 			uint32_t processing_us = k_cyc_to_us_floor32(k_cycle_get_32() - start);
 			key = k_spin_lock(&lock);
@@ -187,6 +191,8 @@ static void run_worker(void *a, void *b, void *c)
 					status.score_permille = scores[winner];
 					status.inference_us = inference_us;
 					++status.windows;
+					accepted = speech_decision_update(&decision, scores, k_uptime_get(),
+									  &event);
 					if (accepted) {
 						status.event_valid = true;
 						status.event_label = event;
@@ -223,6 +229,18 @@ void speech_capture_push(const struct usb_audio_snapshot *capture, const uint8_t
 	ARG_UNUSED(capture); ARG_UNUSED(pcm); ARG_UNUSED(bytes);
 }
 #endif
+
+int speech_service_set_threshold(uint8_t threshold_percent)
+{
+	if (threshold_percent < 50 || threshold_percent > 100) { return -ERANGE; }
+	k_spinlock_key_t key = k_spin_lock(&lock);
+	status.threshold_percent = threshold_percent;
+#ifdef CONFIG_APP_SPEECH_AI
+	speech_decision_set_threshold(&decision, (uint16_t)threshold_percent * 10U);
+#endif
+	k_spin_unlock(&lock, key);
+	return 0;
+}
 
 void speech_snapshot_get(struct speech_snapshot *out)
 {

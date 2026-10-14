@@ -49,6 +49,27 @@ int main(void)
 	for (int64_t t = 0; t < 1000; t += 100) {
 		assert(!speech_decision_update(&decision, weak_up, t, &event));
 	}
-	puts("PASS: decision thresholds, cadence, quiet rearm, ties, reset and direction labels");
+	speech_decision_reset(&decision);
+	assert(decision.threshold_permille == 800);
+	speech_decision_set_threshold(&decision, 900);
+	uint16_t below[SPEECH_LABEL_COUNT] = {0,50,899,50};
+	uint16_t at_threshold[SPEECH_LABEL_COUNT] = {0,50,900,50};
+	for (int64_t t = 0; t < 300; t += 100) {
+		assert(!speech_decision_update(&decision, below, t, &event));
+	}
+	assert(!speech_decision_update(&decision, at_threshold, 300, &event));
+	assert(!speech_decision_update(&decision, at_threshold, 400, &event));
+	assert(speech_decision_update(&decision, at_threshold, 500, &event));
+	assert(event == SPEECH_YES);
+
+	speech_decision_reset(&decision);
+	assert(!speech_decision_update(&decision, yes, 0, &event));
+	assert(!speech_decision_update(&decision, yes, 100, &event));
+	speech_decision_set_threshold(&decision, 900);
+	assert(!speech_decision_update(&decision, at_threshold, 200, &event));
+	assert(!speech_decision_update(&decision, at_threshold, 300, &event));
+	assert(speech_decision_update(&decision, at_threshold, 400, &event));
+	assert(event == SPEECH_YES);
+	puts("PASS: configurable thresholds, cadence, quiet rearm, ties and direction labels");
 	return 0;
 }
