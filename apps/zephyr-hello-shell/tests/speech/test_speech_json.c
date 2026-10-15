@@ -8,7 +8,8 @@ int main(void)
 {
 	char buffer[3072];
 	struct speech_snapshot snapshot = {
-		.state = SPEECH_UNAVAILABLE, .reason = "mic \"gone\"\n", .threshold_percent = 80
+		.state = SPEECH_UNAVAILABLE, .reason = "mic \"gone\"\n", .threshold_percent = 80,
+		.timing = SPEECH_TIMING_DEFAULT
 	};
 	int n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
 	assert(n > 0 && (size_t)n == strlen(buffer));
@@ -34,6 +35,9 @@ int main(void)
 	snapshot.threshold_percent = 65;
 	n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
 	assert(n > 0 && strstr(buffer, "\"threshold_percent\":65"));
+	snapshot.timing = (struct speech_timing){.accept_frames = 2, .rearm_ms = 150, .min_gap_ms = 700};
+	n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
+	assert(n > 0 && strstr(buffer, "\"threshold_percent\":65,\"accept_frames\":2,\"rearm_ms\":150,\"min_gap_ms\":700"));
 	puts(buffer);
 	static const char *const names[] = {"up", "down", "left", "right", "stop"};
 	for (int i = 0; i < 5; ++i) {
@@ -99,6 +103,9 @@ int main(void)
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
 	snapshot.score_permille = 910;
 	snapshot.threshold_percent = 49;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	snapshot.threshold_percent = 80;
+	snapshot.timing.accept_frames = 0;
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
 	puts("PASS: snapshot JSON attempts, thresholds, nulls, escaping, labels, validation and capacity");
 	return 0;

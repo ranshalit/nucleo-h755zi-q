@@ -11,7 +11,7 @@ function asset(name) {
   return [...match[1].matchAll(/"(?:\\.|[^"\\])*"/g)].map(x => JSON.parse(x[0])).join('');
 }
 let speech = {state: 'unavailable', reason: 'no ready USB microphone', label: null, score: null,
-  last_event: null, threshold_percent: 80};
+  last_event: null, threshold_percent: 80, accept_frames: 3, rearm_ms: 300, min_gap_ms: 1000};
 let failSpeech = false;
 let failThreshold = false;
 let thresholdRequest = null;
@@ -37,8 +37,9 @@ const server = http.createServer((req, res) => {
           res.end(JSON.stringify({error: 'threshold rejected'}));
           return;
         }
-        speech = {...speech, threshold_percent: thresholdRequest.threshold_percent};
-        res.end(JSON.stringify({threshold_percent: speech.threshold_percent}));
+        speech = {...speech, ...thresholdRequest};
+        res.end(JSON.stringify({threshold_percent: speech.threshold_percent,
+          accept_frames: speech.accept_frames, rearm_ms: speech.rearm_ms, min_gap_ms: speech.min_gap_ms}));
       });
     }
     else if (req.url === '/api/v1/speech') {
@@ -66,6 +67,11 @@ async function main() {
     await waitAttr('voice-pad', 'data-disabled', '1');
     assert.equal(await attr('joy-knob', 'data-dir'), 'stop');
     await waitText('speech-threshold-active', 'Active threshold: 80%');
+    await waitText('speech-timing-active', 'Active acceptance: 3 frames | re-arm 300 ms | gap 1000 ms');
+    assert.equal(await page.$eval('#speech-frames-input', n => n.value), '3');
+    speech = {...speech, accept_frames: 2, rearm_ms: 200, min_gap_ms: 700};
+    await waitText('speech-timing-active', 'Active acceptance: 2 frames | re-arm 200 ms | gap 700 ms');
+    assert.equal(await page.$eval('#speech-gap-input', n => n.value), '700');
     speech = {...speech, state: 'warming-up', reason: 'collecting audio'};
     await waitText('speech-state', 'warming-up');
     speech = {state: 'running', reason: 'recognizing English yes/no/up/down/left/right/stop', label: 'yes', score: .91,
@@ -119,8 +125,35 @@ async function main() {
     });
     await page.click('#speech-threshold-apply');
     await waitText('speech-threshold-active', 'Active threshold: 65%');
-    await waitText('speech-threshold-feedback', 'Threshold updated');
-    assert.deepStrictEqual(thresholdRequest, {threshold_percent: 65});
+    await waitText('speech-threshold-feedback', 'Settings updated');
+    assert.deepStrictEqual(thresholdRequest, {threshold_percent: 65, accept_frames: 2, rearm_ms: 200, min_gap_ms: 700});
+    const setInput = (id, value) => page.$eval('#' + id, (input, value) => {
+      input.value = value;
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    }, value);
+    await setInput('speech-frames-input', '3');
+    await setInput('speech-rearm-input', '0');
+    await setInput('speech-gap-input', '250');
+    await page.click('#speech-threshold-apply');
+    await waitText('speech-timing-active', 'Active acceptance: 3 frames | re-arm 0 ms | gap 250 ms');
+    assert.deepStrictEqual(thresholdRequest, {threshold_percent: 65, accept_frames: 3, rearm_ms: 0, min_gap_ms: 250});
+    let before = thresholdRequests;
+    for (const [id, bad, msg] of [
+      ['speech-frames-input', '0', 'Frames must be a whole number from 1 to 10'],
+      ['speech-rearm-input', '2001', 'Re-arm must be a whole number from 0 to 2000 ms'],
+      ['speech-gap-input', '-1', 'Gap must be a whole number from 0 to 5000 ms']]) {
+      const good = await page.$eval('#' + id, n => n.value);
+      await setInput(id, bad);
+      await page.click('#speech-threshold-apply');
+      await waitText('speech-threshold-feedback', msg);
+      await setInput(id, good);
+    }
+    assert.equal(thresholdRequests, before, 'invalid timing was sent');
+    await setInput('speech-frames-input', '1');
+    await setInput('speech-rearm-input', '100');
+    await setInput('speech-gap-input', '500');
+    await page.click('#speech-threshold-apply');
+    await waitText('speech-timing-active', 'Active acceptance: 1 frame | re-arm 100 ms | gap 500 ms');
     failThreshold = true;
     await page.$eval('#speech-threshold-input', input => {
       input.value = '70';

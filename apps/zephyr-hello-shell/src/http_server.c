@@ -33,7 +33,7 @@
 #define MOUSE_RESPONSE_BUF_SIZE 256
 #define MIC_RESPONSE_BUF_SIZE 384
 #define LED_POST_BUF_SIZE 64
-#define SPEECH_SETTINGS_POST_BUF_SIZE 64
+#define SPEECH_SETTINGS_POST_BUF_SIZE 160
 
 struct led_command {
 	char led[16];
@@ -47,10 +47,16 @@ static const struct json_obj_descr led_command_descr[] = {
 
 struct speech_threshold_command {
 	int32_t threshold_percent;
+	int32_t accept_frames;
+	int32_t rearm_ms;
+	int32_t min_gap_ms;
 };
 
 static const struct json_obj_descr speech_threshold_command_descr[] = {
 	JSON_OBJ_DESCR_PRIM(struct speech_threshold_command, threshold_percent, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct speech_threshold_command, accept_frames, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct speech_threshold_command, rearm_ms, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct speech_threshold_command, min_gap_ms, JSON_TOK_NUMBER),
 };
 
 static uint16_t board_http_port = CONFIG_APP_HTTP_PORT;
@@ -769,26 +775,60 @@ static int speech_settings_handler(struct http_client_ctx *client, enum http_dat
 	int ret = json_obj_parse(post_buffer, cursor, speech_threshold_command_descr,
 				 ARRAY_SIZE(speech_threshold_command_descr), &cmd);
 	cursor = 0U;
-	if (ret != expected_parse_mask) {
+	if (ret <= 0 || (ret & ~expected_parse_mask) != 0) {
 		return send_bad_request(client, response_ctx, response, sizeof(response),
-					"expected integer threshold_percent from 50 to 100");
+					"expected integer threshold_percent, accept_frames, rearm_ms or min_gap_ms");
 	}
-	if (cmd.threshold_percent < 50 || cmd.threshold_percent > 100) {
+	bool has_threshold = (ret & BIT(0)) != 0;
+	if (has_threshold && (cmd.threshold_percent < 50 || cmd.threshold_percent > 100)) {
 		return send_bad_request(client, response_ctx, response, sizeof(response),
 					"threshold_percent must be from 50 to 100");
 	}
 
-	ret = speech_service_set_threshold((uint8_t)cmd.threshold_percent);
-	if (ret == -ERANGE) {
-		return send_bad_request(client, response_ctx, response, sizeof(response),
-					"threshold_percent must be from 50 to 100");
+	static struct speech_snapshot current;
+
+	speech_snapshot_get(&current);
+	struct speech_timing timing = current.timing;
+
+	if ((ret & BIT(1)) != 0) {
+		if (cmd.accept_frames < 1 || cmd.accept_frames > SPEECH_ACCEPT_FRAMES_MAX) {
+			return send_bad_request(client, response_ctx, response, sizeof(response),
+						"accept_frames must be from 1 to 10");
+		}
+		timing.accept_frames = (uint8_t)cmd.accept_frames;
 	}
+	if ((ret & BIT(2)) != 0) {
+		if (cmd.rearm_ms < 0 || cmd.rearm_ms > SPEECH_REARM_MS_MAX) {
+			return send_bad_request(client, response_ctx, response, sizeof(response),
+						"rearm_ms must be from 0 to 2000");
+		}
+		timing.rearm_ms = (uint16_t)cmd.rearm_ms;
+	}
+	if ((ret & BIT(3)) != 0) {
+		if (cmd.min_gap_ms < 0 || cmd.min_gap_ms > SPEECH_MIN_GAP_MS_MAX) {
+			return send_bad_request(client, response_ctx, response, sizeof(response),
+						"min_gap_ms must be from 0 to 5000");
+		}
+		timing.min_gap_ms = (uint16_t)cmd.min_gap_ms;
+	}
+
+	if (has_threshold) {
+		ret = speech_service_set_threshold((uint8_t)cmd.threshold_percent);
+		if (ret != 0) {
+			return send_internal_error(client, response_ctx, response, sizeof(response));
+		}
+	}
+	ret = speech_service_set_timing(&timing);
 	if (ret != 0) {
 		return send_internal_error(client, response_ctx, response, sizeof(response));
 	}
 
-	ret = snprintk(response, sizeof(response), "{\"threshold_percent\":%d}",
-		       cmd.threshold_percent);
+	speech_snapshot_get(&current);
+	ret = snprintk(response, sizeof(response),
+		       "{\"threshold_percent\":%u,\"accept_frames\":%u,\"rearm_ms\":%u,"
+		       "\"min_gap_ms\":%u}",
+		       current.threshold_percent, current.timing.accept_frames,
+		       current.timing.rearm_ms, current.timing.min_gap_ms);
 	if (ret < 0 || (size_t)ret >= sizeof(response)) {
 		return send_internal_error(client, response_ctx, response, sizeof(response));
 	}

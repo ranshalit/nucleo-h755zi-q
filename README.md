@@ -806,7 +806,10 @@ events are suppressed until a non-keyword interval. Use **Detection threshold**
 on the Speech AI card to change the cutoff immediately to an integer from 50%
 through 100%. A cutoff change clears any partial confirmation streak, does
 not change the displayed raw model score, and resets to 80% after a board
-reboot. All LEDs keep their existing behavior. **Start listening** remains
+reboot. The same card also sets **Frames above threshold** (1–10, default 3),
+**Re-arm quiet** (0–2000 ms of non-keyword time before another event, default
+300) and **Min gap** (0–5000 ms between accepted events, default 1000); these
+also reset to defaults after a reboot. All LEDs keep their existing behavior. **Start listening** remains
 optional and works independently.
 
 The Speech AI card shows a voice joystick: up/down/left/right latch the knob,
@@ -827,11 +830,12 @@ but report unsupported format for speech recognition.
 `GET /api/v1/speech` returns state/reason, nullable current label/model score,
 nullable last accepted event (label, sequence, board uptime), inference and
 processing times, processed-window count, capture session, audio gaps, and
-dropped recognition frames, plus the active `threshold_percent`. The dashboard
-sets it with `POST /api/v1/speech/settings` and JSON
-`{"threshold_percent": 80}`; the response returns the active value. Requests
-outside 50–100 or with a non-integer value fail with HTTP 400 and do not alter
-the setting. UART command `speech status` shows the same diagnostics. Unplug,
+dropped recognition frames, plus the active `threshold_percent`,
+`accept_frames`, `rearm_ms` and `min_gap_ms`. The dashboard sets them with
+`POST /api/v1/speech/settings` and JSON such as
+`{"threshold_percent": 80, "accept_frames": 3, "rearm_ms": 300, "min_gap_ms": 1000}`;
+any subset of the fields may be sent and the response returns all active values.
+Out-of-range or non-integer values fail with HTTP 400 and change nothing. UART command `speech status` shows the same diagnostics. Unplug,
 input gaps, or queue overflow clear current predictions
 and last event, reset frontend history, and warm up on new contiguous audio.
 The normal native_sim/QEMU application reports speech unavailable; it does

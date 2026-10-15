@@ -8,7 +8,7 @@
 static struct k_spinlock lock;
 static struct speech_snapshot status = {
 	.state = SPEECH_UNAVAILABLE, .reason = "speech recognition unavailable in simulation",
-	.threshold_percent = 80
+	.threshold_percent = 80, .timing = SPEECH_TIMING_DEFAULT
 };
 
 #ifdef CONFIG_APP_SPEECH_AI
@@ -178,6 +178,7 @@ static void run_worker(void *a, void *b, void *c)
 				speech_decision_reset(&decision);
 				speech_decision_set_threshold(&decision,
 							      (uint16_t)status.threshold_percent * 10U);
+				speech_decision_set_timing(&decision, &status.timing);
 				k_spin_unlock(&lock, key);
 				ret = speech_model_reset();
 				if (ret) { model_error(ret); return; }
@@ -266,6 +267,18 @@ int speech_service_set_threshold(uint8_t threshold_percent)
 	status.threshold_percent = threshold_percent;
 #ifdef CONFIG_APP_SPEECH_AI
 	speech_decision_set_threshold(&decision, (uint16_t)threshold_percent * 10U);
+#endif
+	k_spin_unlock(&lock, key);
+	return 0;
+}
+
+int speech_service_set_timing(const struct speech_timing *timing)
+{
+	if (!speech_timing_valid(timing)) { return -ERANGE; }
+	k_spinlock_key_t key = k_spin_lock(&lock);
+	status.timing = *timing;
+#ifdef CONFIG_APP_SPEECH_AI
+	speech_decision_set_timing(&decision, timing);
 #endif
 	k_spin_unlock(&lock, key);
 	return 0;

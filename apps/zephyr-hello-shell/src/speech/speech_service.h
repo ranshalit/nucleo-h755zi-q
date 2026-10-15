@@ -16,6 +16,23 @@ enum speech_label {
 	SPEECH_LABEL_COUNT
 };
 #define SPEECH_WORDS "yes/no/up/down/left/right/stop"
+#define SPEECH_ACCEPT_FRAMES_MAX 10
+#define SPEECH_REARM_MS_MAX 2000
+#define SPEECH_MIN_GAP_MS_MAX 5000
+/* Keyword acceptance: frames above threshold, quiet time to re-arm, gap between events. */
+struct speech_timing {
+	uint8_t accept_frames;
+	uint16_t rearm_ms;
+	uint16_t min_gap_ms;
+};
+#define SPEECH_TIMING_DEFAULT { .accept_frames = 3, .rearm_ms = 300, .min_gap_ms = 1000 }
+static inline bool speech_timing_valid(const struct speech_timing *timing)
+{
+	return timing && timing->accept_frames >= 1 &&
+	       timing->accept_frames <= SPEECH_ACCEPT_FRAMES_MAX &&
+	       timing->rearm_ms <= SPEECH_REARM_MS_MAX &&
+	       timing->min_gap_ms <= SPEECH_MIN_GAP_MS_MAX;
+}
 struct speech_snapshot {
 	enum speech_state state;
 	const char *reason;
@@ -34,10 +51,12 @@ struct speech_snapshot {
 	uint32_t drops;
 	uint32_t session;
 	uint8_t threshold_percent;
+	struct speech_timing timing;
 	struct speech_attempt_tracker attempts;
 };
 int speech_service_start(void);
 int speech_service_set_threshold(uint8_t threshold_percent);
+int speech_service_set_timing(const struct speech_timing *timing);
 void speech_capture_push(const struct usb_audio_snapshot *capture,
 			 const uint8_t *pcm, size_t bytes);
 void speech_capture_changed(const struct usb_audio_snapshot *capture);

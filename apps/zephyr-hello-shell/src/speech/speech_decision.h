@@ -4,6 +4,7 @@
 #include "speech_service.h"
 struct speech_decision {
 	uint16_t threshold_permille;
+	struct speech_timing timing;
 	enum speech_label candidate;
 	unsigned int count;
 	bool armed;
@@ -13,6 +14,7 @@ struct speech_decision {
 };
 void speech_decision_reset(struct speech_decision *decision);
 void speech_decision_set_threshold(struct speech_decision *decision, uint16_t threshold_permille);
+void speech_decision_set_timing(struct speech_decision *decision, const struct speech_timing *timing);
 bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[SPEECH_LABEL_COUNT],
 			    int64_t uptime_ms, enum speech_label *event);
 #endif

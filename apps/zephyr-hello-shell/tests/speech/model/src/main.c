@@ -113,11 +113,14 @@ static void test_service(void)
 	k_msleep(100);
 	assert(speech_service_set_threshold(65) == 0);
 	assert(speech_service_set_threshold(49) == -ERANGE);
+	assert(speech_service_set_timing(&(struct speech_timing){.accept_frames = 0, .rearm_ms = 100, .min_gap_ms = 500}) == -ERANGE);
+	assert(speech_service_set_timing(&(struct speech_timing){.accept_frames = 2, .rearm_ms = 200, .min_gap_ms = 700}) == 0);
 	speech_capture_changed(&capture);
 	k_msleep(30);
 	speech_snapshot_get(&snapshot);
 	assert(snapshot.state == SPEECH_WARMING_UP && !snapshot.prediction_valid);
 	assert(snapshot.threshold_percent == 65);
+	assert(snapshot.timing.accept_frames == 2 && snapshot.timing.rearm_ms == 200 && snapshot.timing.min_gap_ms == 700);
 	uint8_t pcm[192] = {0};
 	for (int i = 0; i < 1200; ++i) {
 		speech_capture_push(&capture, pcm, sizeof(pcm));
@@ -173,7 +176,9 @@ static void test_service(void)
 	speech_snapshot_get(&snapshot);
 	assert(snapshot.state == SPEECH_UNSUPPORTED_FORMAT);
 	assert(snapshot.threshold_percent == 65);
+	assert(snapshot.timing.accept_frames == 2);
 	assert(speech_service_set_threshold(80) == 0);
+	assert(speech_service_set_timing(&(struct speech_timing)SPEECH_TIMING_DEFAULT) == 0);
 	puts("PASS: worker warmup/inference/gap/disconnect/unsupported transitions");
 }
 

@@ -2,23 +2,25 @@
 #include "speech_decision.h"
 #include <string.h>
 
-#define SPEECH_ACCEPT_FRAMES 1
-#define SPEECH_REARM_QUIET_MS 100
-#define SPEECH_MIN_EVENT_GAP_MS 500
-
 void speech_decision_reset(struct speech_decision *decision)
 {
 	memset(decision, 0, sizeof(*decision));
 	decision->threshold_permille = 800;
+	decision->timing = (struct speech_timing)SPEECH_TIMING_DEFAULT;
 	decision->armed = true;
 	decision->quiet_since = -1;
-	decision->last_event = -SPEECH_MIN_EVENT_GAP_MS;
+	decision->last_event = INT64_MIN / 2;
 	decision->last_update = -100;
 }
 void speech_decision_set_threshold(struct speech_decision *decision, uint16_t threshold_permille)
 {
 	if (decision->threshold_permille == threshold_permille) { return; }
 	decision->threshold_permille = threshold_permille;
+	decision->count = 0;
+}
+void speech_decision_set_timing(struct speech_decision *decision, const struct speech_timing *timing)
+{
+	decision->timing = *timing;
 	decision->count = 0;
 }
 bool speech_decision_update(struct speech_decision *decision, const uint16_t scores[SPEECH_LABEL_COUNT],
@@ -37,15 +39,15 @@ bool speech_decision_update(struct speech_decision *decision, const uint16_t sco
 	if (!keyword) {
 		decision->count = 0;
 		if (decision->quiet_since < 0) { decision->quiet_since = uptime_ms; }
-		if (uptime_ms - decision->quiet_since >= SPEECH_REARM_QUIET_MS) { decision->armed = true; }
+		if (uptime_ms - decision->quiet_since >= decision->timing.rearm_ms) { decision->armed = true; }
 		return false;
 	}
 	decision->quiet_since = -1;
 	if (decision->candidate != (enum speech_label)winner) { decision->count = 0; }
 	decision->candidate = (enum speech_label)winner;
-	if (decision->count < SPEECH_ACCEPT_FRAMES) { ++decision->count; }
-	if (!decision->armed || decision->count < SPEECH_ACCEPT_FRAMES ||
-	    uptime_ms - decision->last_event < SPEECH_MIN_EVENT_GAP_MS) { return false; }
+	if (decision->count < decision->timing.accept_frames) { ++decision->count; }
+	if (!decision->armed || decision->count < decision->timing.accept_frames ||
+	    uptime_ms - decision->last_event < decision->timing.min_gap_ms) { return false; }
 	decision->armed = false;
 	decision->last_event = uptime_ms;
 	*event = decision->candidate;
