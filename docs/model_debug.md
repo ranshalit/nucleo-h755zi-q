@@ -335,6 +335,38 @@ Full `flash_zephyr_hello_shell.sh` validation passes; the host NIC is now
 The classifier resolver also registers DepthwiseConv2D and AveragePool2D
 (int8) with an 80 KB arena, ready for a DS-CNN model. Bank1 is 99.44% full.
 
+## v5a: DS-CNN classifier (2026-10-15)
+
+`models/speech_keywords.tflite` is now a DS-CNN (64 filters, 4 depthwise
+blocks, stride 2x2), trained on int8 board-quantized features from
+`dataset_v4` (Speech Commands plus the recorded negatives). Pipeline is in
+`scripts/dscnn/`: `dump_features.py`, then `train_dscnn.py`, then
+`convert_static.py` (batch-1 static shapes, so only the ops in the firmware
+resolver are emitted). Size is 45,112 B (bank2 now 41% used).
+
+Stock int8 test accuracy is 94.3% (v3 80.2%, v4a 79.5%).
+
+Held-out results, offline replay with the board rule (N consecutive = 3):
+
+| Model | thr | False/min | Recall quiet | Recall noisy |
+|---|---|---|---|---|
+| v3 | 800 | 6.6 | 55% | 69% |
+| v4a | 800 | 4.2 | 55% | 63% |
+| v5a | 700 | 0.8 | 64% | 71% |
+| v5a | 800 | 0.8 | 64% | 69% |
+| v5a | 900 | 0.5 | 61% | 63% |
+
+At 800, v5a has zero false events on keyboard, whisper, handling, fan and
+ambient. What remains is close English speech (4/min) and Hebrew (4/min).
+
+On the board: 52.7 ms per inference, and the classifier arena is 71 KB. The
+pipeline runs with no gaps or drops at one inference per 100 ms. Full flash
+validation passes.
+
+Recall is still limited. The user spoke keywords about every 0.6-1 s, which
+is faster than the 1 s cooldown, and the test set is one speaker. Next steps:
+live testing, more positive recordings, and maybe a 70% threshold.
+
 ## Next investigation
 
 - Reproduce hiss, handling, coughs, and distant speech in separately labeled
