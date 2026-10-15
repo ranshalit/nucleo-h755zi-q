@@ -812,6 +812,9 @@ optional and works independently.
 The Speech AI card shows a voice joystick: up/down/left/right latch the knob,
 stop centers it, yes/no press the matching button for 0.7 s. Joystick state
 lives in the browser only.
+In a first spoken check on the board (v3 model, 80% threshold) the joystick
+and YES/NO buttons followed accepted events correctly; some spoken words were
+missed or misrecognized. This is a user observation, not a scored benchmark.
 
 Capture remains 48 kHz stereo 16-bit. A separate bounded queue feeds the
 recognizer without consuming the browser playback ring. The left channel
