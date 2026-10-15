@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "speech_attempt.h"
 #include "usb_audio_buffer.h"
 enum speech_state {
 	SPEECH_UNAVAILABLE, SPEECH_INITIALIZING, SPEECH_WARMING_UP,
@@ -33,6 +34,7 @@ struct speech_snapshot {
 	uint32_t drops;
 	uint32_t session;
 	uint8_t threshold_percent;
+	struct speech_attempt_tracker attempts;
 };
 int speech_service_start(void);
 int speech_service_set_threshold(uint8_t threshold_percent);

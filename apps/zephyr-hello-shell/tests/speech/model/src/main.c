@@ -127,17 +127,45 @@ static void test_service(void)
 	speech_snapshot_get(&snapshot);
 	assert(snapshot.state == SPEECH_RUNNING && snapshot.prediction_valid);
 	assert(snapshot.windows > 0 && snapshot.drops == 0);
+	/* Feed a real keyword until a candidate starts, then interrupt it. */
+	size_t offset = 12;
+	while (offset + 8 <= sizeof(yes_audio) && memcmp(yes_audio + offset, "data", 4)) {
+		uint32_t n = sys_get_le32(yes_audio + offset + 4);
+		offset += 8 + n + (n & 1);
+	}
+	assert(offset + 8 <= sizeof(yes_audio));
+	uint32_t audio_bytes = sys_get_le32(yes_audio + offset + 4);
+	assert(audio_bytes <= sizeof(yes_audio) - offset - 8);
+	bool live = false;
+	for (size_t pos = 0; pos + 16 <= audio_bytes; pos += 16) {
+		for (size_t sample = 0; sample < 8; ++sample) {
+			uint16_t value = sys_get_le16(yes_audio + offset + 8 + pos + sample * 2);
+			for (size_t repeat = 0; repeat < 3; ++repeat) {
+				size_t dst = (sample * 3 + repeat) * 4;
+				sys_put_le16(value, pcm + dst);
+				sys_put_le16(value, pcm + dst + 2);
+			}
+		}
+		speech_capture_push(&capture, pcm, 96);
+		k_usleep(500);
+		speech_snapshot_get(&snapshot);
+		if (snapshot.attempts.live.valid) { live = true; break; }
+	}
+	assert(live);
 	++capture.missed;
 	speech_capture_changed(&capture);
 	speech_snapshot_get(&snapshot);
 	assert(!snapshot.prediction_valid && !snapshot.event_valid && snapshot.gaps == 1);
 	assert(snapshot.threshold_percent == 65);
+	assert(!snapshot.attempts.live.valid && snapshot.attempts.last.valid);
+	assert(snapshot.attempts.last.interrupted);
 	capture.ready = false;
 	capture.connected = false;
 	++capture.session;
 	speech_capture_changed(&capture);
 	speech_snapshot_get(&snapshot);
 	assert(snapshot.state == SPEECH_UNAVAILABLE && !snapshot.prediction_valid);
+	assert(!snapshot.attempts.live.valid && !snapshot.attempts.last.valid);
 	capture.ready = true;
 	capture.connected = true;
 	capture.sample_rate_hz = 44100;

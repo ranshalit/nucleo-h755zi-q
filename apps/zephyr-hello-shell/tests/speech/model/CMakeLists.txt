@@ -8,6 +8,7 @@ include("${APP_ROOT}/cmake/speech_model.cmake")
 target_include_directories(app PRIVATE "${APP_ROOT}/src/speech" "${APP_ROOT}/src/usb_host")
 target_sources(app PRIVATE src/main.c
   "${APP_ROOT}/src/speech/speech_service.c"
+  "${APP_ROOT}/src/speech/speech_attempt.c"
   "${APP_ROOT}/src/speech/speech_audio.c"
   "${APP_ROOT}/src/speech/speech_decision.c")
 foreach(fixture yes_1000ms no_1000ms silence_1000ms noise_1000ms yes_30ms no_30ms)

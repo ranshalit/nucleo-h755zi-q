@@ -49,6 +49,7 @@ static struct k_thread worker;
 
 static void invalidate_locked(void)
 {
+	speech_attempt_interrupt(&status.attempts, k_uptime_get());
 	status.prediction_valid = false;
 	status.event_valid = false;
 	status.inference_us = 0;
@@ -63,6 +64,7 @@ static bool supported(const struct usb_audio_snapshot *capture)
 
 static void capture_changed_locked(const struct usb_audio_snapshot *capture)
 {
+	bool new_session = input.session != capture->session;
 	bool reset = input.session != capture->session || input.ready != capture->ready ||
 		     input.connected != capture->connected || input.errors != capture->errors ||
 		     input.missed != capture->missed || input.sample_rate_hz != capture->sample_rate_hz ||
@@ -75,6 +77,7 @@ static void capture_changed_locked(const struct usb_audio_snapshot *capture)
 	status.session = capture->session;
 	if (gap) { ++status.gaps; }
 	invalidate_locked();
+	if (new_session) { speech_attempt_reset(&status.attempts); }
 	if (failed) { return; }
 	if (!capture->connected || !capture->ready) {
 		status.state = SPEECH_UNAVAILABLE;
@@ -214,13 +217,16 @@ static void run_worker(void *a, void *b, void *c)
 					status.score_permille = scores[winner];
 					status.inference_us = inference_us;
 					++status.windows;
-					accepted = speech_decision_update(&decision, scores, k_uptime_get(),
+					int64_t now = k_uptime_get();
+					accepted = speech_decision_update(&decision, scores, now,
 									  &event);
+					speech_attempt_update(&status.attempts, scores, winner, now,
+							      accepted, event);
 					if (accepted) {
 						status.event_valid = true;
 						status.event_label = event;
 						++status.event_sequence;
-						status.event_uptime_ms = k_uptime_get();
+						status.event_uptime_ms = now;
 					}
 				}
 			}

@@ -19,6 +19,10 @@ cc -std=c11 -Wall -Wextra -Werror -I"${APP}/src/speech" -I"${APP}/src/usb_host" 
   -o "${BUILD}/test_decision"
 "${BUILD}/test_decision"
 cc -std=c11 -Wall -Wextra -Werror -I"${APP}/src/speech" -I"${APP}/src/usb_host" \
+  "${APP}/tests/speech/test_speech_attempt.c" "${APP}/src/speech/speech_attempt.c" \
+  -o "${BUILD}/test_attempt"
+"${BUILD}/test_attempt"
+cc -std=c11 -Wall -Wextra -Werror -I"${APP}/src/speech" -I"${APP}/src/usb_host" \
   "${APP}/tests/speech/test_speech_json.c" "${APP}/src/speech/speech_json.c" \
   -o "${BUILD}/test_json"
 "${BUILD}/test_json"
@@ -31,7 +35,7 @@ if [[ "${MODEL}" == 1 ]]; then
       "${APP}/tests/speech/model" -d "${ROOT}/build/speech-model-native"
   )
   "${ROOT}/build/speech-model-native/zephyr/zephyr.exe" \
-    -uart_stdinout -no-rt -stop_at=40 | tee "${BUILD}/model.log"
+    -uart_stdinout -no-rt -stop_at=180 | tee "${BUILD}/model.log"
   grep -q 'PASS: model fixtures' "${BUILD}/model.log"
   grep -q 'PASS: worker warmup/inference/gap/disconnect/unsupported transitions' "${BUILD}/model.log"
 fi
