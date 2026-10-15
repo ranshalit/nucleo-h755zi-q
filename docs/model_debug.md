@@ -259,6 +259,59 @@ No setting achieves both good recall and a low false rate.
 
 Scripts: `analyze.py`, `replay3.py`, `exp1.py`-`exp3.py` in the session folder.
 
+### Labeled recording sessions (2026-10-15)
+
+Recorded with `scripts/record_speech_session.py` (board stream -> raw + 16 kHz
+mono WAV through the firmware FIR path) into `~/kws-data/sessions/<label>/`
+(local only, contains voices). One speaker, normal mic position unless noted:
+
+| Label | Takes | Notes |
+|-------|-------|-------|
+| neg_keyboard | 2 | typing/clicking |
+| neg_ambient_fan | 2 | quiet room, about -55 dBFS |
+| neg_fan_close | 1 | mic held at a fan, about -16 dBFS |
+| neg_cough | 2 | cough, throat clearing, sigh |
+| neg_whisper | 1 | old `shhhh` capture used as held-out take |
+| neg_handling | 1 | real mic/cable touching |
+| neg_close_speech | 1 | close Hebrew/English, no keywords; old Hebrew capture held out |
+| neg_distant_speech | 1 | far talking |
+| pos_keywords_quiet | 1 | loop yes..stop, 56 words, first 3.47 s trimmed |
+| pos_keywords_noisy | 1 | same loop with background noise, 49 words |
+
+Word timestamps for positives came from offline faster-whisper `small.en`
+(`*.words.json`); all words were recognized in the expected loop order.
+The user spoke roughly one word every 0.6-1 s; the board rule (1 s cooldown,
+300 ms quiet re-arm) cannot emit events that fast, so recall below is per-word
+"keyword score >= threshold shortly after the word", not board events.
+
+Split: train on take 1 / first 30 s of single takes; test on take 2, last 30 s,
+old `shhhh`/Hebrew/ambient captures, and both keyword takes (never trained on).
+
+### v4a: v3 recipe + recorded negatives
+
+Only the data changed (same tiny_conv, steps and rates). 1,082 1-s clips from
+the training portions were added as an extra unknown class `_neg_`,
+replicated to form 40% of the unknown training pool, and the same recordings
+were added to `_background_noise_`. Stock int8 test 79.45% (v3 80.22%);
+keyword classes unchanged within about 2 points, but stock `_unknown_` fell
+from 46.7% to 30.3%. Local only: `~/kws-train/speech_keywords_v4a.tflite`,
+SHA-256 `9c70cda5db9485f117cdf9351f1bf5c3c3443fd557dfd8c80a8bc9306fa6cc16`;
+scripts in `~/kws-train/v4_experiment/`.
+
+Held-out false events/min (score 800, 3 updates):
+
+| Model | keyboard | cough | handling | whisper | close speech | Hebrew | all negatives | recall quiet / noisy |
+|-------|----------|-------|----------|---------|--------------|--------|---------------|----------------------|
+| v3 | 9 | 2 | 14 | 18 | 18 | 10 | 6.6 | 55% / 69% |
+| v4a | 3 | 0 | 2 | 16 | 14 | 12 | 4.2 | 55% / 63% |
+
+With the decision rule retuned, v4a at score 700 / 3 updates gives 5.8/min
+and 68% / 80% recall: better than v3 at its default 800 (6.6/min, 55% / 69%)
+on both axes. Non-speech negatives (handling, keys, coughs) are largely
+fixed by data; speech-like negatives (whisper, close speech, Hebrew) remain at
+12-16/min. Hypothesis: tiny_conv (one 8-filter conv layer) lacks capacity to
+separate keywords from arbitrary speech; next factor to test is the model.
+
 ## Next investigation
 
 - Reproduce hiss, handling, coughs, and distant speech in separately labeled
