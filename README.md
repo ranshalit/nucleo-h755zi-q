@@ -811,6 +811,16 @@ are not supported.
 | Thread | Dedicated Zephyr thread, priority 11 (below USB worker at 10) |
 | Compute | About 53 ms per 100 ms inference on the current build (~50% of M7) |
 
+How it executes: everything runs as software on the Cortex-M7 core. The M7
+includes the Armv7E-M DSP extension, i.e. SIMD instructions inside the CPU
+itself (one 32-bit register holds 2 x 16-bit or 4 x 8-bit values; e.g. `SMLAD`
+does two multiply-accumulates per instruction). CMSIS-NN is Arm's library of
+neural-network kernels (convolution, fully connected, etc.) written to use those
+instructions. TensorFlow Lite Micro is the interpreter that walks the model
+graph and calls the CMSIS-NN kernel for each layer instead of plain C loops,
+giving roughly 2-4x speedup over plain C on the same core. The int8 model maps
+directly onto these integer SIMD instructions; the FPU is barely used.
+
 Per inference (every 100 ms, called a "frame" by the acceptance settings):
 
 1. Capture 48 kHz stereo 16-bit from the USB microphone.
