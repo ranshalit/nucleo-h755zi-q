@@ -837,6 +837,38 @@ and last event, reset frontend history, and warm up on new contiguous audio.
 The normal native_sim/QEMU application reports speech unavailable; it does
 not pretend to recognize host or simulated microphone audio.
 
+The Speech AI card also shows **Live attempt** and **Last attempt** keyword
+peaks. The board captures each keyword's maximum model score at every inference,
+including scores below the detection threshold and trailing frames where
+silence/unknown wins; browser polling cannot lose a brief peak within an attempt.
+Each row shows its peak, the confirmed active threshold, the difference in
+percentage points, and whether the existing command logic accepted that word.
+New live peaks briefly glow amber (green for accepted words); reduced-motion
+preferences disable the glow. A score above threshold alone is **not** an
+accepted command and does not move the voice joystick.
+
+These are model candidate episodes: an attempt starts when any keyword wins,
+regardless of threshold, and ends after silence/unknown wins continuously for
+300 ms. Silence never erases the completed result, which stays visible while
+the next live attempt runs. All seven keyword scores are tracked during each
+attempt, even when another class wins. Repeated words without a silence/unknown
+break can merge; an utterance classified entirely as silence/unknown cannot
+start an attempt. Independent audio-activity detection is not included.
+
+The API exposes nullable `live_attempt` and `last_attempt` objects with
+`sequence`, `start_ms`, `end_ms` (null while live), `interrupted`, and seven
+`keywords` entries: `{"label":"left","peak":0.674,"accepted":false}`.
+Scores range from 0 to 1 and are model outputs, not calibrated probabilities.
+Changing threshold recomputes displayed differences without resetting peaks or
+changing historical acceptance flags. Audio gaps/errors preserve the current
+attempt as interrupted; a new microphone capture session clears both records.
+Polling failures keep the displayed numbers but mark them stale.
+
+On the M7 speech build, the dashboard JavaScript shares flash bank 2 sector 0
+with the read-only models to keep the application within flash bank 1.
+The normal `zephyr.hex` image programs both sections; CM4 remains unused.
+Other targets keep the script in normal read-only storage.
+
 Initialize the pinned dependency before a board build:
 
 ```bash

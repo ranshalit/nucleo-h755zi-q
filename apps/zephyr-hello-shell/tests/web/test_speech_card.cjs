@@ -41,7 +41,10 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({threshold_percent: speech.threshold_percent}));
       });
     }
-    else if (req.url === '/api/v1/speech') { res.statusCode = failSpeech ? 503 : 200; res.end(JSON.stringify(speech)); }
+    else if (req.url === '/api/v1/speech') {
+      res.statusCode = failSpeech ? 503 : 200;
+      res.end(JSON.stringify({session: 0, live_attempt: null, last_attempt: null, ...speech}));
+    }
     else if (req.url === '/api/v1/mic') { res.end(JSON.stringify({attached: false, ready: false})); }
     else if (req.url === '/api/v1/mouse') { res.end(JSON.stringify({attached: false})); }
     else { res.end(JSON.stringify({board: {}, network: {}, io: {leds: [], button: {}}})); }
@@ -139,7 +142,92 @@ async function main() {
     await waitText('speech-threshold-feedback', 'Enter a whole number from 50 to 100');
     assert.equal(thresholdRequests, requestsBeforeInvalid, 'invalid local value was sent');
     failThreshold = false;
+    const keywords = ['yes', 'no', 'up', 'down', 'left', 'right', 'stop'];
+    const attempt = {
+      sequence: 1, start_ms: 100, end_ms: 500, interrupted: false,
+      keywords: keywords.map(label => ({
+        label, peak: label === 'left' ? .674 : .01, accepted: false,
+      })),
+    };
+    speech = {...speech, state: 'running', label: 'silence', score: .9,
+      threshold_percent: 80, live_attempt: null, last_attempt: attempt};
+    const waitPeakText = (id, text) => page.waitForFunction((id, text) =>
+      document.getElementById(id)?.textContent.includes(text), {timeout: 5000}, id, text);
+    await waitPeakText('speech-last-attempt', '67.4%');
+    await waitPeakText('speech-last-attempt', '12.6 percentage points below');
+    await page.evaluate(() => {
+      window.peakAnimations = [];
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (frames, options) {
+        if (this.classList.contains('speech-peak-row')) {
+          window.peakAnimations.push({word: this.dataset.word, frames});
+        }
+        return animate.call(this, frames, options);
+      };
+    });
+    speech.live_attempt = {...attempt, sequence: 2, start_ms: 600, end_ms: null};
+    await waitPeakText('speech-live-attempt', '67.4%');
+    assert.match(await page.$eval('#speech-last-attempt', n => n.textContent), /67.4%/);
+    assert.equal(await page.evaluate(() => window.peakAnimations.length), 7);
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(await page.evaluate(() => window.peakAnimations.length), 7, 'same peaks replayed glow');
+    speech.live_attempt = {...speech.live_attempt, keywords: speech.live_attempt.keywords.map(e =>
+      e.label === 'left' ? {...e, peak: .725} : e)};
+    await waitPeakText('speech-live-attempt', '72.5%');
+    assert.equal(await page.evaluate(() => window.peakAnimations.length), 8);
+    assert.equal(await page.$eval('#speech-live-attempt [data-strongest="1"]', n => n.dataset.word), 'left');
+    speech.live_attempt.keywords[4].peak = .805;
+    await waitPeakText('speech-live-attempt', 'Above threshold, not accepted');
+    assert.equal(await page.evaluate(() => window.peakAnimations.length), 9);
+    assert.equal(await attr('joy-knob', 'data-dir'), 'right', 'unaccepted peak changed joystick');
+    speech.live_attempt.keywords[4].accepted = true;
+    await page.waitForFunction(() =>
+      document.querySelector('#speech-live-attempt [data-word="left"]')?.dataset.accepted === '1');
+    assert.equal(await page.evaluate(() => window.peakAnimations.length), 9);
+    await page.$eval('#speech-threshold-input', input => {
+      input.value = '90';
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    await page.click('#speech-threshold-apply');
+    await waitPeakText('speech-live-attempt', 'Threshold 90%');
+    await waitPeakText('speech-live-attempt', '9.5 percentage points below');
+    assert.equal(await page.evaluate(() => window.peakAnimations.length), 9, 'threshold change replayed glow');
+    await page.$eval('#speech-threshold-input', input => {
+      input.value = '50';
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    await new Promise(r => setTimeout(r, 700));
+    assert.match(await page.$eval('#speech-live-attempt', n => n.textContent), /Threshold 90%/);
+    await page.emulateMediaFeatures([{name: 'prefers-reduced-motion', value: 'reduce'}]);
+    speech.live_attempt.keywords[4].peak = .9;
+    speech.live_attempt.keywords[4].accepted = false;
+    await waitPeakText('speech-live-attempt', 'At threshold, not accepted');
+    assert.equal(await page.evaluate(() => window.peakAnimations.length), 9, 'reduced motion still animated');
+    await page.emulateMediaFeatures([{name: 'prefers-reduced-motion', value: 'no-preference'}]);
+    failSpeech = true;
+    await waitText('speech-attempt-status', 'Stale peaks: speech status unavailable');
+    assert.match(await page.$eval('#speech-live-attempt', n => n.textContent), /90.0%/);
+    assert.match(await page.$eval('#speech-last-attempt', n => n.textContent), /67.4%/);
+    failSpeech = false;
+    const validLive = JSON.parse(JSON.stringify(speech.live_attempt));
+    speech.live_attempt = {...validLive, keywords: validLive.keywords.map(e =>
+      e.label === 'left' ? {...e, peak: 1.1} : e)};
+    await waitText('speech-health', 'Invalid speech attempt response from board');
+    assert.match(await page.$eval('#speech-live-attempt', n => n.textContent), /90.0%/);
+    assert.doesNotMatch(await page.$eval('#speech-live-attempt', n => n.textContent), /110.0%/);
+    speech = {...speech, state: 'warming-up', label: null, score: null,
+      live_attempt: null, last_attempt: {...validLive, end_ms: 1100, interrupted: true}};
+    await waitPeakText('speech-attempt-status', 'Last attempt interrupted; peaks retained');
+    await waitPeakText('speech-attempt-status', 'Historical peaks');
+    await waitText('speech-live-attempt', 'No active attempt');
+    await waitPeakText('speech-last-attempt', '90.0%');
+    speech = {...speech, state: 'running', label: 'unknown', score: .9,
+      last_attempt: {...speech.last_attempt, interrupted: false}};
+    await waitPeakText('speech-attempt-status', 'Model candidate episodes');
+    assert.match(await page.$eval('#speech-last-attempt', n => n.textContent), /90.0%/);
     speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
+    await waitText('speech-last-attempt', 'No completed attempt');
+    await waitText('speech-live-attempt', 'No active attempt');
     await waitText('speech-label', '--');
     await waitText('speech-event', 'No accepted keyword');
     await waitAttr('voice-pad', 'data-disabled', '1');
@@ -178,7 +266,7 @@ async function main() {
     await page4.close();
     speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
     assert.equal(ledRequests, 0, 'speech changed LED state');
-    console.log('PASS: speech states, direction events, joystick/buttons, threshold updates/errors and unchanged LEDs');
+    console.log('PASS: speech states, events, attempt peaks/glow, silence retention, stale/errors, thresholds and unchanged LEDs');
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));

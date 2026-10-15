@@ -75,7 +75,7 @@ void speech_attempt_update(struct speech_attempt_tracker *tracker,
 #endif
 ```
 
-- [ ] Add failing `test_speech_attempt.c` with these lifecycle assertions:
+- [x] Add failing `test_speech_attempt.c` with these lifecycle assertions:
 
 ```c
 #include <assert.h>
@@ -110,7 +110,7 @@ int main(void)
 }
 ```
 
-- [ ] Add its runner after the decision test in `scripts/test_zephyr_speech.sh`:
+- [x] Add its runner after the decision test in `scripts/test_zephyr_speech.sh`:
 
 ```bash
 cc -std=c11 -Wall -Wextra -Werror -I"${APP}/src/speech" -I"${APP}/src/usb_host" \
@@ -119,8 +119,8 @@ cc -std=c11 -Wall -Wextra -Werror -I"${APP}/src/speech" -I"${APP}/src/usb_host" 
 "${BUILD}/test_attempt"
 ```
 
-- [ ] Run `scripts/test_zephyr_speech.sh`; expect missing header/source failure.
-- [ ] Implement tracker with these function bodies in `speech_attempt.c`,
+- [x] Run `scripts/test_zephyr_speech.sh`; expect missing header/source failure.
+- [x] Implement tracker with these function bodies in `speech_attempt.c`,
   including `speech_service.h` and `string.h`:
 
 ```c
@@ -170,15 +170,15 @@ void speech_attempt_update(struct speech_attempt_tracker *t,
 }
 ```
 
-- [ ] Compile tracker unconditionally in the existing common `target_sources`.
+- [x] Compile tracker unconditionally in the existing common `target_sources`.
   Assert `SPEECH_LABEL_COUNT - SPEECH_YES == SPEECH_KEYWORD_COUNT` in the service.
   No tracker work executes in capture callbacks except bounded reset/interruption.
-- [ ] Integrate under the existing spinlock: call
+- [x] Integrate under the existing spinlock: call
   `speech_attempt_interrupt(&status.attempts, k_uptime_get());` from
   `invalidate_locked()`. In `capture_changed_locked`, remember whether
   `input.session != capture->session` before assigning `input`; after invalidation,
   call `speech_attempt_reset(&status.attempts)` only for a new session.
-- [ ] After `speech_decision_update`, use the same inference timestamp for
+- [x] After `speech_decision_update`, use the same inference timestamp for
   decision, event, and tracker:
 
 ```c
@@ -187,13 +187,13 @@ accepted = speech_decision_update(&decision, scores, now, &event);
 speech_attempt_update(&status.attempts, scores, winner, now, accepted, event);
 ```
 
-- [ ] Extend tracker assertions to cover a short silence break that cancels on
+- [x] Extend tracker assertions to cover a short silence break that cancels on
   renewed keyword activity, competing keywords without a break, peaks not
   decreasing, acceptance flags independent of peaks, empty interruption, and a
   new attempt not inheriting previous maxima. Extend existing worker fixture
   tests to observe records through `speech_snapshot_get` on gaps and reconnect.
-- [ ] Run `scripts/test_zephyr_speech.sh`; expect all pure C tests to pass.
-- [ ] Commit only Task 1 files with subject
+- [x] Run `scripts/test_zephyr_speech.sh`; expect all pure C tests to pass.
+- [x] Commit only Task 1 files with subject
   `feat(speech): retain per-attempt keyword peaks` and required Copilot trailer.
 
 ### Task 2: Extend bounded speech JSON
@@ -208,7 +208,7 @@ speech_attempt_update(&status.attempts, scores, winner, now, accepted, event);
 Always serialize seven keyword entries in fixed label order. Completed
 `end_ms` is an integer; live `end_ms` is null. Existing fields remain unchanged.
 
-- [ ] Extend `test_speech_json.c` buffer to 3072. Put the null assertions after
+- [x] Extend `test_speech_json.c` buffer to 3072. Put the null assertions after
   the first serialization, and the remaining assertions before existing
   invalid-input tests while the snapshot is valid:
 
@@ -226,8 +226,8 @@ snapshot.attempts.live.peaks[0] = 1001;
 assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
 ```
 
-- [ ] Run `scripts/test_zephyr_speech.sh`; expect missing JSON fields.
-- [ ] Add a serialization helper reusing `append`; pass the existing label table:
+- [x] Run `scripts/test_zephyr_speech.sh`; expect missing JSON fields.
+- [x] Add a serialization helper reusing `append`; pass the existing label table:
 
 ```c
 static int emit_attempt(char *out, size_t capacity, size_t *offset,
@@ -261,7 +261,7 @@ static int emit_attempt(char *out, size_t capacity, size_t *offset,
 }
 ```
 
-- [ ] Remove the closing `}` from the existing statistics `EMIT` and append:
+- [x] Remove the closing `}` from the existing statistics `EMIT` and append:
 
 ```c
 EMIT(",\"live_attempt\":");
@@ -273,12 +273,12 @@ if (ret) { return ret; }
 EMIT("}");
 ```
 
-- [ ] Change only `speech_handler` response from 768 to 3072 bytes.
+- [x] Change only `speech_handler` response from 768 to 3072 bytes.
   Extend JSON assertions to completed/interrupted records, int64 timestamps,
   all seven entries, invalid records, maximum scores/counters and exact capacity:
   with a valid snapshot, size `n + 1` succeeds and size `n` returns `-ENOSPC`.
-- [ ] Run `scripts/test_zephyr_speech.sh`; expect all tests to pass.
-- [ ] Commit Task 2 files with subject `feat(speech): expose attempt peaks in API`
+- [x] Run `scripts/test_zephyr_speech.sh`; expect all tests to pass.
+- [x] Commit Task 2 files with subject `feat(speech): expose attempt peaks in API`
   and required Copilot trailer.
 
 ### Task 3: Persistent dashboard display
@@ -287,7 +287,7 @@ EMIT("}");
 threshold, and session. New DOM IDs: `speech-live-attempt`, `speech-last-attempt`,
 `speech-attempt-status`. Existing voice-event logic is untouched.
 
-- [ ] Extend `test_speech_card.cjs` fixture after existing threshold tests,
+- [x] Extend `test_speech_card.cjs` fixture after existing threshold tests,
   explicitly restore threshold 80, and add a failing persistent-record test:
 
 ```js
@@ -310,10 +310,10 @@ await page.waitForFunction(() =>
 assert.match(await page.$eval('#speech-last-attempt', n => n.textContent), /67.4%/);
 ```
 
-- [ ] Run the existing web test:
+- [x] Run the existing web test:
   `NODE_PATH="$HOME/.copilot/skills/browser/node_modules" node apps/zephyr-hello-shell/tests/web/test_speech_card.cjs`.
   Expected failure: new attempt DOM not present.
-- [ ] Insert the following markup after the current model-score line, encoded
+- [x] Insert the following markup after the current model-score line, encoded
   as existing C string literals:
 
 ```html
@@ -326,7 +326,7 @@ assert.match(await page.$eval('#speech-last-attempt', n => n.textContent), /67.4
 </section>
 ```
 
-- [ ] Cache DOM nodes with existing `byId`. Add `speechPeakStatus = null`,
+- [x] Cache DOM nodes with existing `byId`. Add `speechPeakStatus = null`,
   `speechConfirmedThreshold = 80`, and `speechPeakPrevious = {}` beside speech
   state variables. Add these functions (encoded as C strings):
 
@@ -414,7 +414,7 @@ if (identity !== speechPeakIdentity) {
 
 Rendering last attempt must not overwrite a live comparison.
 
-- [ ] Wire `renderSpeechPeaks()` on every valid poll, outside the
+- [x] Wire `renderSpeechPeaks()` on every valid poll, outside the
   `state === 'running'` branch and independent of `clearSpeech()`. Reject malformed
   attempt records through the existing polling catch, label retained records
   stale, and do not fabricate empty success results. Before rendering valid
@@ -423,7 +423,7 @@ Rendering last attempt must not overwrite a live comparison.
   value and recomputes labels immediately without replaying animations.
   API failure sets `speech-attempt-status` to
   `Stale peaks: speech status unavailable` while retaining prior rows.
-- [ ] Add styling:
+- [x] Add styling:
 
 ```css
 .speech-attempts { margin-top: 1rem; }
@@ -432,26 +432,52 @@ Rendering last attempt must not overwrite a live comparison.
 .speech-peak-row[data-accepted="1"] { color: #86efac; }
 ```
 
-- [ ] Extend web assertions for new peak versus repeated poll animation counts,
+- [x] Extend web assertions for new peak versus repeated poll animation counts,
   reduced motion using `page.emulateMediaFeatures`, above-threshold rejected
   scores, confirmed threshold updates versus dirty inputs, interrupted and
   warming-up retention, stale labels on HTTP failure, reconnect clearing,
   malformed records, and unchanged existing voice actions.
-- [ ] Document `live_attempt` and `last_attempt` and candidate-episode limitation
+- [x] Document `live_attempt` and `last_attempt` and candidate-episode limitation
   in README speech section. State that silence terminates rather than erases
   attempts, last record stays while next runs, peaks are not accepted commands,
   and threshold difference uses currently confirmed threshold.
-- [ ] Run `scripts/test_zephyr_speech.sh` and the web command above. Then run
+- [x] Run `scripts/test_zephyr_speech.sh` and the web command above. Then run
   `scripts/flash_zephyr_hello_shell.sh --build-only`; expect successful M7 build.
   If tools are missing, report exact missing prerequisite rather than claiming
   firmware validation. Do not flash or modify host networking.
-- [ ] Inspect `git diff --check` and commit only Task 3 files with subject
+- [x] Inspect `git diff --check` and commit only Task 3 files with subject
   `feat(web): show live and last attempt peaks` and required Copilot trailer.
 
 ## Review and delivery
 
-- [ ] Confirm every spec requirement maps to Tasks 1-3, especially trailing
+Execution adjustment: the added dashboard exceeded M7 flash bank 1 by 1,036
+bytes. Place the read-only dashboard JavaScript in the unused portion of the
+existing 128 KiB `SPEECH_BANK2` region, after the models, using a target-gated
+section attribute in `web_assets.c` and `cmake/speech_bank2.ld`. Preserve normal
+placement on simulation/non-speech targets. The existing hex flashing flow
+programs both sections; confirm final linker placement and region bounds.
+
+- [x] Confirm every spec requirement maps to Tasks 1-3, especially trailing
   silence capture, independent acceptance flags, interruption, and stale UI.
-- [ ] Report actual completed behavior, any blocked build/hardware verification,
+- [x] Report actual completed behavior, any blocked build/hardware verification,
   and candidate-episode limitation. Hardware spoken-word validation is separate
   from host tests and must not be claimed without observing the board.
+
+## Execution evidence
+
+- `scripts/test_zephyr_speech.sh --model`: pure C tests, seven model fixtures,
+  worker gap interruption and session reset passed. Extended simulator deadline
+  from 40 to 180 seconds to accommodate the added keyword-feed worker coverage.
+- `test_speech_card.cjs`: persistent peaks, below/above/exact-threshold labels,
+  highlight deduplication, reduced motion, stale/malformed responses,
+  interruption, and existing voice actions passed.
+- `test_mic_player.cjs`: existing microphone playback regressions passed.
+- M7 build with Zephyr SDK succeeded after the flash placement adjustment:
+  FLASH 1,007,604 / 1,048,576 bytes; RAM 471,344 / 524,288 bytes;
+  SPEECH_BANK2 95,901 / 131,072 bytes.
+- Linker output preserves models at `0x08100000` and places dashboard JavaScript
+  immediately after them at `0x0810d288`; the sections do not overlap.
+- Normal native application build succeeded with speech unavailable and normal
+  read-only script placement.
+- Physical board was not flashed; live spoken-word hardware validation was not
+  performed. Candidate-episode limitations remain as specified.
