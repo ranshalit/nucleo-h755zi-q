@@ -862,7 +862,7 @@ recall for rejection and is not an established fix. See
 [noise investigation](docs/model_debug.md) and [follow-up tasks](TODO.md).
 
 On NUCLEO-H755ZI-Q, classifier and frontend occupy bank 2 sector 0 at
-`0x08100000` (43,784 bytes in a 128 KiB region). Inference still runs on M7.
+`0x08100000` (47,784 bytes in a 128 KiB region). Inference still runs on M7.
 `CONFIG_STM32H7_BOOT_M4_AT_INIT=n` prevents Zephyr from starting M4, but the board
 option byte **BCM4 must also remain 0**. Flashing the generated HEX programs both
 banks and overwrites any M4 image in that sector. Do not enable M4 or deploy
