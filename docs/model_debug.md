@@ -193,6 +193,72 @@ These machine-local paths are not portable project assets. The failed
 room-noise training scripts are archived locally; the checked-in training script
 uses the v1 stock-noise recipe and rejects experimental added-noise datasets.
 
+## v3 root-cause analysis (2026-10-15)
+
+Question: are false triggers and missed words caused by the microphone, the
+model, or the decision condition (score threshold etc.)? Conclusion: the
+**model** is the main cause; the mic is not, and decision tuning cannot fix it.
+
+Evidence is offline replay through the v3 int8 model with the board's
+63-tap FIR / 3:1 decimation and the TensorFlow microfrontend (same caveat as
+above: not proven bit-exact with the live TFLM frontend). Live board at the
+time: v3 running, 0 gaps, 0 drops, 42 accepted events in 14 minutes.
+
+Recordings (48 kHz stereo, both channels identical, i.e. mono mic):
+
+- `ambient` — new 30 s capture of the quiet lab room
+  (session `7c92f2a6-…/files/ambient.{raw,wav}`).
+- `shhhh` — whispered hiss (earlier session `a5156cb1-…`).
+- `mic-handling` — despite the name, this capture is mainly **close-talking
+  Hebrew speech with no keywords** (confirmed by the user on listening).
+  It is kept as a valid negative: non-keyword speech must map to `unknown`.
+
+### Microphone: not the cause
+
+- Bandwidth: loud-frame spectrum is flat-ish to ~7 kHz, -28..-36 dB at 8 kHz,
+  i.e. close to Speech Commands speech (1 k:+7, 4 k:-10, 7 k:-16 dB rel 1-3 kHz).
+- Quiet-room floor about -53 dBFS (20 ms RMS median); no clipping; no DC.
+- Passing test keywords through the board 48 kHz FIR path costs about 3 points
+  of recall (58.9% -> 55.4%); -20 dB gain costs about 4 points.
+
+### Decision condition: cannot separate noise from words
+
+Noise and foreign speech reach 950-996/1000 on a keyword for over 1 s
+(e.g. `right` on whisper, `down`/`no` on Hebrew speech), as confident as
+real keywords. Sweep over threshold, consecutive count, 3-window averaging
+and top-2 margin, with 280 held-out keyword clips mixed into real ambient
+audio through the board path:
+
+| Setting | Keyword hits | Wrong word | False/min: ambient / shhhh / Hebrew speech / room2 |
+|---------|--------------|------------|-----------------------------------------------------|
+| Current (score 800, 3 updates) | 47% | 2.5% | 4 / 18 / 10 / 0.2 |
+| Score 500, 2 updates | ~70% | 21% | 12 / 24 / 20 / 6 |
+| Strictest tested | ~50% | ~4% | 6 / 16 / 8 / 0.2 |
+
+No setting achieves both good recall and a low false rate.
+
+### Model: the root cause
+
+- Missed words: when the word is the model's best guess, it is correct 79% of
+  the time; the 800/3-update rule cuts that to 47% hits. Loosening the rule
+  recovers recall only at the cost of proportionally more false events.
+- False triggers: training never contained whisper, contact, cough, keyboard
+  or non-English close speech as negatives. The `unknown` class is the weakest
+  (46.7% int8). In the quiet room `silence` scores about 3/1000, so residual
+  sound is assigned to `unknown` or a keyword.
+
+### Plan
+
+1. Record separately labeled sessions: negatives (hiss, handling, keyboard,
+   cough, fan, distant and close non-keyword speech incl. Hebrew) and
+   positives (the seven keywords by the actual users). Hold out whole sessions.
+2. Retrain with the recorded negatives in `unknown`/`silence`, keyword
+   augmentation with real room audio; consider a larger model (bank 2 has room).
+3. Measure false events/min and recall on held-out sessions; only then retune
+   the decision rule.
+
+Scripts: `analyze.py`, `replay3.py`, `exp1.py`-`exp3.py` in the session folder.
+
 ## Next investigation
 
 - Reproduce hiss, handling, coughs, and distant speech in separately labeled
