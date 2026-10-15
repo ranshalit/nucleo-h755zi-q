@@ -797,6 +797,34 @@ service, or Internet connection is needed.
 The browser only displays results. Hebrew and general speech transcription
 are not supported.
 
+#### Model summary
+
+| Item | Value |
+|---|---|
+| Model | TensorFlow `micro_speech` `tiny_conv` CNN, int8 quantized, v3 |
+| Classes | 9: silence, unknown, yes, no, up, down, left, right, stop |
+| Training data | Google Speech Commands v0.02 (`scripts/train_speech_keywords.sh`) |
+| Accuracy | 80.22% held-out int8 clip classification (N=3508); not a false-trigger rate |
+| Runtime | TensorFlow Lite Micro + CMSIS-NN kernels, pure software on Cortex-M7 (480 MHz) |
+| Accelerator | None (no NPU on STM32H755); M4 core stays off |
+| Model storage | Flash bank 2 at `0x08100000` (frontend + classifier) |
+| Thread | Dedicated Zephyr thread, priority 11 (below USB worker at 10) |
+| Compute | About 53 ms per 100 ms inference on the current build (~50% of M7) |
+
+Per inference (every 100 ms, called a "frame" by the acceptance settings):
+
+1. Capture 48 kHz stereo 16-bit from the USB microphone.
+2. Low-pass filter the left channel and decimate to 16 kHz.
+3. Frontend model turns the last ~1 s of audio into 49 x 40 features
+   (30 ms windows, 20 ms stride).
+4. Classifier outputs 9 scores (0-1, not calibrated probabilities).
+
+Because every frame scores a sliding ~1 s window, consecutive frames overlap by
+about 90%. A spoken word stays fully inside the window for several frames, so
+word alignment within a frame does not matter. Words spoken less than ~1 s
+apart share a window and their scores mix; the acceptance timing settings
+below control how quickly back-to-back words can be accepted.
+
 Recognition starts automatically with a ready microphone. Open
 `http://192.168.55.2/`, speak near the headset microphone, and watch **Detected**.
 The current model class and model score are raw predictions, not accepted
