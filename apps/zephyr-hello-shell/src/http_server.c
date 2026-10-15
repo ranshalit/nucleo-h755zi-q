@@ -708,7 +708,7 @@ static int speech_handler(struct http_client_ctx *client, enum http_data_status 
 			  const struct http_request_ctx *request_ctx,
 			  struct http_response_ctx *response_ctx, void *user_data)
 {
-	static char __noinit response[768];
+	static char __noinit response[3072];
 	struct speech_snapshot snapshot;
 	ARG_UNUSED(request_ctx);
 	ARG_UNUSED(user_data);

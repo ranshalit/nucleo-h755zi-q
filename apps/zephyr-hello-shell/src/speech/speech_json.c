@@ -17,6 +17,37 @@ static int append(char *out, size_t capacity, size_t *offset, const char *format
 	return 0;
 }
 
+static int emit_attempt(char *out, size_t capacity, size_t *offset,
+			const struct speech_attempt *attempt, bool live,
+			const char *const labels[])
+{
+	if (!attempt->valid) { return append(out, capacity, offset, "null"); }
+	if (!attempt->sequence || attempt->start_ms < 0 ||
+	    (live && (attempt->interrupted || attempt->end_ms != 0)) ||
+	    (!live && attempt->end_ms < attempt->start_ms)) {
+		return -EINVAL;
+	}
+	for (unsigned int i = 0; i < SPEECH_KEYWORD_COUNT; ++i) {
+		if (attempt->peaks[i] > 1000) { return -EINVAL; }
+	}
+	int ret;
+#define PART(...) do { ret = append(out, capacity, offset, __VA_ARGS__); if (ret) { return ret; } } while (0)
+	PART("{\"sequence\":%u,\"start_ms\":%lld,\"end_ms\":",
+	     attempt->sequence, (long long)attempt->start_ms);
+	if (live) { PART("null"); }
+	else { PART("%lld", (long long)attempt->end_ms); }
+	PART(",\"interrupted\":%s,\"keywords\":[", attempt->interrupted ? "true" : "false");
+	for (unsigned int i = 0; i < SPEECH_KEYWORD_COUNT; ++i) {
+		PART("%s{\"label\":\"%s\",\"peak\":%u.%03u,\"accepted\":%s}",
+		     i ? "," : "", labels[SPEECH_YES + i],
+		     attempt->peaks[i] / 1000, attempt->peaks[i] % 1000,
+		     attempt->accepted[i] ? "true" : "false");
+	}
+	PART("]}");
+#undef PART
+	return 0;
+}
+
 int speech_snapshot_json(const struct speech_snapshot *snapshot, char *out, size_t capacity)
 {
 	static const char *const states[] = {
@@ -53,10 +84,17 @@ int speech_snapshot_json(const struct speech_snapshot *snapshot, char *out, size
 		     (long long)snapshot->event_uptime_ms);
 	} else { EMIT("null"); }
 	EMIT(",\"threshold_percent\":%u,\"inference_us\":%u,\"processing_us\":%u,\"max_processing_us\":%u,"
-	     "\"windows\":%u,\"gaps\":%u,\"drops\":%u,\"session\":%u}",
+	     "\"windows\":%u,\"gaps\":%u,\"drops\":%u,\"session\":%u",
 	     snapshot->threshold_percent, snapshot->inference_us, snapshot->processing_us,
 	     snapshot->max_processing_us,
 	     snapshot->windows, snapshot->gaps, snapshot->drops, snapshot->session);
+	EMIT(",\"live_attempt\":");
+	ret = emit_attempt(out, capacity, &offset, &snapshot->attempts.live, true, labels);
+	if (ret) { return ret; }
+	EMIT(",\"last_attempt\":");
+	ret = emit_attempt(out, capacity, &offset, &snapshot->attempts.last, false, labels);
+	if (ret) { return ret; }
+	EMIT("}");
 #undef EMIT
 	return (int)offset;
 }

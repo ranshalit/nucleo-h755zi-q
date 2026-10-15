@@ -6,7 +6,7 @@
 #include "speech_service.h"
 int main(void)
 {
-	char buffer[1024];
+	char buffer[3072];
 	struct speech_snapshot snapshot = {
 		.state = SPEECH_UNAVAILABLE, .reason = "mic \"gone\"\n", .threshold_percent = 80
 	};
@@ -15,6 +15,7 @@ int main(void)
 	assert(strstr(buffer, "\"label\":null,\"score\":null"));
 	assert(strstr(buffer, "\"last_event\":null"));
 	assert(strstr(buffer, "\"threshold_percent\":80"));
+	assert(strstr(buffer, "\"live_attempt\":null,\"last_attempt\":null"));
 	assert(strstr(buffer, "mic \\\"gone\\\"\\u000a"));
 	assert(speech_snapshot_json(&snapshot, buffer, 10) == -ENOSPC);
 	snapshot.state = SPEECH_RUNNING;
@@ -45,6 +46,49 @@ int main(void)
 		snprintf(expected, sizeof(expected), "\"last_event\":{\"label\":\"%s\"", names[i]);
 		assert(strstr(buffer, expected));
 	}
+	snapshot.attempts.live = (struct speech_attempt){
+		.valid = true, .sequence = 1, .start_ms = 100,
+		.peaks = {674, 0, 0, 0, 0, 0, 0}
+	};
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) > 0);
+	assert(strstr(buffer, "\"end_ms\":null"));
+	assert(strstr(buffer, "\"label\":\"yes\",\"peak\":0.674,\"accepted\":false"));
+	snapshot.attempts.last = snapshot.attempts.live;
+	snapshot.attempts.last.end_ms = INT64_C(5000000000);
+	snapshot.attempts.last.interrupted = true;
+	snapshot.attempts.last.accepted[0] = true;
+	snapshot.attempts.last.peaks[6] = 1000;
+	n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
+	assert(n > 0);
+	assert(strstr(buffer, "\"end_ms\":5000000000,\"interrupted\":true"));
+	assert(strstr(buffer, "\"label\":\"yes\",\"peak\":0.674,\"accepted\":true"));
+	assert(strstr(buffer, "\"label\":\"stop\",\"peak\":1.000"));
+	assert(speech_snapshot_json(&snapshot, buffer, (size_t)n + 1) == n);
+	assert(speech_snapshot_json(&snapshot, buffer, (size_t)n) == -ENOSPC);
+	snapshot.attempts.live.peaks[0] = 1001;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	snapshot.attempts.live.peaks[0] = 674;
+	snapshot.attempts.live.interrupted = true;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	snapshot.attempts.live.interrupted = false;
+	snapshot.attempts.last.end_ms = 99;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	snapshot.attempts.last.end_ms = 500;
+	snapshot.attempts.live.sequence = 0;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	snapshot.attempts.live.sequence = UINT32_MAX;
+	snapshot.attempts.last.sequence = UINT32_MAX;
+	snapshot.attempts.live.start_ms = INT64_MAX;
+	snapshot.attempts.last.start_ms = INT64_MAX;
+	snapshot.attempts.last.end_ms = INT64_MAX;
+	snapshot.windows = snapshot.gaps = snapshot.drops = snapshot.session = UINT32_MAX;
+	snapshot.event_sequence = UINT32_MAX;
+	snapshot.event_uptime_ms = INT64_MAX;
+	snapshot.inference_us = snapshot.processing_us = snapshot.max_processing_us = UINT32_MAX;
+	for (size_t i = 0; i < SPEECH_KEYWORD_COUNT; ++i) {
+		snapshot.attempts.live.peaks[i] = snapshot.attempts.last.peaks[i] = 1000;
+	}
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) > 0);
 	snapshot.label = SPEECH_LABEL_COUNT;
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
 	snapshot.label = SPEECH_YES;
@@ -56,6 +100,6 @@ int main(void)
 	snapshot.score_permille = 910;
 	snapshot.threshold_percent = 49;
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
-	puts("PASS: snapshot JSON thresholds, nulls, escaping, direction/stop labels and overflow");
+	puts("PASS: snapshot JSON attempts, thresholds, nulls, escaping, labels, validation and capacity");
 	return 0;
 }
