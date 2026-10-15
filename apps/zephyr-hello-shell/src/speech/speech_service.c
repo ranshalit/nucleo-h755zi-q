@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "speech_service.h"
 #include <errno.h>
+#include <stdlib.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 static struct k_spinlock lock;
@@ -28,6 +30,20 @@ static bool started;
 static bool failed;
 static bool model_ready;
 K_SEM_DEFINE(audio_ready, 0, 1);
+K_SEM_DEFINE(bench_done, 0, 1);
+static atomic_t bench_runs;
+static int bench_ret;
+static uint32_t bench_min_us, bench_max_us;
+
+static void run_pending_bench(void)
+{
+	unsigned int runs = (unsigned int)atomic_set(&bench_runs, 0);
+	if (!runs) { return; }
+	/* Min-of-N filters preemption; locking the scheduler here starves USB host. */
+	bench_ret = speech_model_window_ready() ?
+		    speech_model_bench(runs, &bench_min_us, &bench_max_us) : -EAGAIN;
+	k_sem_give(&bench_done);
+}
 K_THREAD_STACK_DEFINE(worker_stack, 8192);
 static struct k_thread worker;
 
@@ -147,6 +163,7 @@ static void run_worker(void *a, void *b, void *c)
 	while (true) {
 		(void)k_sem_take(&audio_ready, K_MSEC(20));
 		while (true) {
+			run_pending_bench();
 			key = k_spin_lock(&lock);
 			uint32_t generation = queue.generation;
 			bool ready = input.connected && input.ready && supported(&input);
@@ -270,7 +287,35 @@ static int cmd_speech_status(const struct shell *shell, size_t argc, char **argv
 		    snapshot.inference_us, snapshot.processing_us, snapshot.max_processing_us);
 	return 0;
 }
+#ifdef CONFIG_APP_SPEECH_AI
+static int cmd_speech_bench(const struct shell *shell, size_t argc, char **argv)
+{
+	unsigned long runs = argc > 1 ? strtoul(argv[1], NULL, 10) : 20;
+	if (runs < 1 || runs > 1000) {
+		shell_error(shell, "runs must be 1..1000");
+		return -EINVAL;
+	}
+	k_sem_reset(&bench_done);
+	atomic_set(&bench_runs, (atomic_val_t)runs);
+	k_sem_give(&audio_ready);
+	if (k_sem_take(&bench_done, K_SECONDS(30))) {
+		shell_error(shell, "speech worker did not respond");
+		return -ETIMEDOUT;
+	}
+	if (bench_ret) {
+		shell_error(shell, "bench failed: %d", bench_ret);
+		return bench_ret;
+	}
+	shell_print(shell, "classifier runs=%lu min=%u us max=%u us arena=%u bytes", runs,
+		    bench_min_us, bench_max_us, (unsigned)speech_model_arena_used(false));
+	return 0;
+}
+#endif
 SHELL_STATIC_SUBCMD_SET_CREATE(speech_commands,
 	SHELL_CMD(status, NULL, "Speech recognition status and timing", cmd_speech_status),
+#ifdef CONFIG_APP_SPEECH_AI
+	SHELL_CMD_ARG(bench, NULL, "Time the classifier and its ops [runs]",
+		      cmd_speech_bench, 1, 1),
+#endif
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(speech, &speech_commands, "On-board English keyword recognition (" SPEECH_WORDS ")", NULL);

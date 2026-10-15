@@ -312,6 +312,29 @@ fixed by data; speech-like negatives (whisper, close speech, Hebrew) remain at
 12-16/min. Hypothesis: tiny_conv (one 8-filter conv layer) lacks capacity to
 separate keywords from arbitrary speech; next factor to test is the model.
 
+## M7 caches were off; inference 27 ms -> 4.5 ms (2026-10-15)
+
+The v3 classifier took ~27 ms for ~0.36 M MACs (~36 cycles/MAC), far slower
+than CMSIS-NN should be. The new shell command `speech bench [runs]` re-runs
+the classifier on its current input and prints per-op times:
+
+| Build | CONV_2D | FULLY_CONNECTED | Total (min of 20) |
+|---|---|---|---|
+| before | 26.8 ms | 537 us | 27.3 ms |
+| `CONFIG_CACHE_MANAGEMENT=y` | 4.34 ms | 154 us | 4.47 ms |
+
+Root cause: `CONFIG_ICACHE`/`CONFIG_DCACHE` were set, but without
+`CONFIG_CACHE_MANAGEMENT` the `sys_cache_*_enable()` calls in the STM32H7
+`soc_early_init_hook` compile to nothing, so the M7 ran uncached. The fix is
+in `boards/nucleo_h755zi_q_stm32h755xx_m7.conf`. Ethernet DMA descriptors and
+buffers live in SRAM3 (`0x30040000`), so the overlay now marks SRAM3
+`ATTR_MPU_RAM_NOCACHE` to keep them coherent. USB host runs without DMA.
+Full `flash_zephyr_hello_shell.sh` validation passes; the host NIC is now
+`192.168.55.101`, so pass `--host-ipv4 192.168.55.101`.
+
+The classifier resolver also registers DepthwiseConv2D and AveragePool2D
+(int8) with an 80 KB arena, ready for a DS-CNN model. Bank1 is 99.44% full.
+
 ## Next investigation
 
 - Reproduce hiss, handling, coughs, and distant speech in separately labeled

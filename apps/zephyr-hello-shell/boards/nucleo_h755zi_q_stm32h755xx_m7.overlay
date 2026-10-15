@@ -1,3 +1,5 @@
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+
 &gpiod {
 	usb_vbus_disable {
 		gpio-hog;
@@ -28,4 +30,9 @@
 		reg = <0x08100000 DT_SIZE_K(128)>;
 		zephyr,memory-region = "SPEECH_BANK2";
 	};
+};
+
+/* Ethernet DMA descriptors/buffers live here; keep them coherent with D-cache on. */
+&sram3 {
+	zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM_NOCACHE)>;
 };

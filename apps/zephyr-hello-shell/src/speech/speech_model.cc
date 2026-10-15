@@ -6,9 +6,12 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include "tensorflow/lite/micro/kernels/conv.h"
+#include "tensorflow/lite/micro/kernels/depthwise_conv.h"
 #include "tensorflow/lite/micro/kernels/fully_connected.h"
+#include "tensorflow/lite/micro/kernels/pooling.h"
 #include "tensorflow/lite/micro/kernels/softmax.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_profiler_interface.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 
 #if DT_NODE_EXISTS(DT_NODELABEL(speech_model_flash))
@@ -24,12 +27,39 @@ alignas(16) SPEECH_MODEL_DATA const unsigned char classifier_data[] = {
 alignas(16) SPEECH_MODEL_DATA const unsigned char frontend_data[] = {
 #include <audio_preprocessor_int8.inc>
 };
-constexpr size_t arena_size = 16384;
+constexpr size_t frontend_arena_size = 16384;
+/* DS-CNN keeps two 25x20x64 int8 activations live plus kernel scratch. */
+constexpr size_t classifier_arena_size = 81920;
 constexpr size_t label_count = SPEECH_MODEL_LABELS;
-alignas(16) uint8_t frontend_arena[arena_size];
-alignas(16) uint8_t classifier_arena[arena_size];
+/* Per-op cycle totals, enabled only while `speech bench` runs. */
+class OpProfiler : public tflite::MicroProfilerInterface {
+public:
+	static constexpr int max_ops = 24;
+	bool enabled = false;
+	int count = 0;
+	const char *tags[max_ops] = {};
+	uint64_t cycles[max_ops] = {};
+	uint32_t starts[max_ops] = {};
+	int next = 0;
+	uint32_t BeginEvent(const char *tag) override
+	{
+		if (!enabled || next >= max_ops) { return max_ops; }
+		int i = next++;
+		tags[i] = tag;
+		if (count < next) { count = next; }
+		starts[i] = k_cycle_get_32();
+		return (uint32_t)i;
+	}
+	void EndEvent(uint32_t handle) override
+	{
+		if (handle < max_ops) { cycles[handle] += k_cycle_get_32() - starts[handle]; }
+	}
+};
+OpProfiler op_profiler;
+alignas(16) uint8_t frontend_arena[frontend_arena_size];
+alignas(16) uint8_t classifier_arena[classifier_arena_size];
 tflite::MicroMutableOpResolver<18> frontend_ops;
-tflite::MicroMutableOpResolver<4> classifier_ops;
+tflite::MicroMutableOpResolver<6> classifier_ops;
 alignas(tflite::MicroInterpreter) uint8_t frontend_storage[sizeof(tflite::MicroInterpreter)];
 alignas(tflite::MicroInterpreter) uint8_t classifier_storage[sizeof(tflite::MicroInterpreter)];
 tflite::MicroInterpreter *frontend;
@@ -52,6 +82,8 @@ int register_ops()
 	ADD_KERNEL(classifier_ops, FullyConnected, tflite::Register_FULLY_CONNECTED_INT8());
 	ADD_KERNEL(classifier_ops, Conv2D, tflite::Register_CONV_2D_INT8());
 	ADD_KERNEL(classifier_ops, Softmax, tflite::Register_SOFTMAX_INT8());
+	ADD_KERNEL(classifier_ops, DepthwiseConv2D, tflite::Register_DEPTHWISE_CONV_2D_INT8());
+	ADD_KERNEL(classifier_ops, AveragePool2D, tflite::Register_AVERAGE_POOL_2D_INT8());
 	ADD(frontend_ops, Reshape);
 	ADD(frontend_ops, Cast);
 	ADD(frontend_ops, StridedSlice);
@@ -101,7 +133,8 @@ int speech_model_init(void)
 	const auto *model = tflite::GetModel(classifier_data);
 	if (model->version() != TFLITE_SCHEMA_VERSION) { return -EINVAL; }
 	classifier = new (classifier_storage) tflite::MicroInterpreter(
-		model, classifier_ops, classifier_arena, sizeof(classifier_arena));
+		model, classifier_ops, classifier_arena, sizeof(classifier_arena), nullptr,
+		&op_profiler);
 	if (classifier->AllocateTensors() != kTfLiteOk) { return -ENOMEM; }
 	if (!tensor_matches(classifier->input(0), kTfLiteInt8, 1960) ||
 	    !tensor_matches(classifier->output(0), kTfLiteInt8, label_count) ||
@@ -175,6 +208,29 @@ int speech_model_invoke(uint16_t scores[label_count], uint32_t *duration_us)
 		int score = static_cast<int>((output->data.int8[i] - output->params.zero_point) *
 					    output->params.scale * 1000.0f + 0.5f);
 		scores[i] = static_cast<uint16_t>(MAX(0, MIN(1000, score)));
+	}
+	return 0;
+}
+
+int speech_model_bench(unsigned int runs, uint32_t *min_us, uint32_t *max_us)
+{
+	if (!classifier || !runs || !min_us || !max_us) { return -EINVAL; }
+	*min_us = UINT32_MAX;
+	*max_us = 0;
+	op_profiler = OpProfiler();
+	op_profiler.enabled = true;
+	for (unsigned int i = 0; i < runs; ++i) {
+		op_profiler.next = 0;
+		uint32_t start = k_cycle_get_32();
+		if (classifier->Invoke() != kTfLiteOk) { op_profiler.enabled = false; return -EIO; }
+		uint32_t us = k_cyc_to_us_floor32(k_cycle_get_32() - start);
+		*min_us = MIN(*min_us, us);
+		*max_us = MAX(*max_us, us);
+	}
+	op_profiler.enabled = false;
+	for (int i = 0; i < op_profiler.count; ++i) {
+		printk("speech op %d %s %u us\n", i, op_profiler.tags[i] ? op_profiler.tags[i] : "?",
+		       k_cyc_to_us_floor32((uint32_t)(op_profiler.cycles[i] / runs)));
 	}
 	return 0;
 }
