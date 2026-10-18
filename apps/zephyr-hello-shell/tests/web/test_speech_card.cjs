@@ -68,6 +68,10 @@ async function main() {
       });
     };
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    assert.equal(await page.title(), 'Embedded device dashboard');
+    assert.equal(await page.$eval('.hero h1', n => n.textContent), 'Embedded device dashboard');
+    assert.equal(await page.$eval('.hero', n => n.textContent.includes('Board I/O') ||
+      n.textContent.includes('Live device status, USB mouse input, and LED controls on one page.')), false);
     const waitText = (id, text) => page.waitForFunction((id, text) =>
       document.getElementById(id)?.textContent === text, {timeout: 5000}, id, text);
     const attr = (id, name) => page.$eval('#' + id, (n, name) => n.getAttribute(name), name);

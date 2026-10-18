@@ -791,7 +791,7 @@ def attempt_validation(attempt: int) -> bool:
         )
         net_ping_ok = f"bytes from {HOST_IPV4_ADDR}" in net_ping_output
         host_ping_ok = host_ping_ok
-        host_http_root_ok = host_http_root_ok and "<title>Board I/O dashboard</title>" in host_http_root_output
+        host_http_root_ok = host_http_root_ok and "<title>Embedded device dashboard</title>" in host_http_root_output
         host_http_status_ok = (
             host_http_status_ok
             and isinstance(host_http_status_doc, dict)
