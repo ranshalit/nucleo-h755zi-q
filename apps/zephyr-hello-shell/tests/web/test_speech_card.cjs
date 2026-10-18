@@ -374,11 +374,12 @@ async function main() {
       }
       if (width === 375) { await screenshot('mission-control-mobile'); }
       speech = {state: 'running', reason: 'recognizing', label: 'up', score: .91,
-        session: 3, threshold_percent: 60};
+        session: 3, threshold_percent: 60, inference_us: 1500, max_processing_us: 2400};
       for (const direction of ['up', 'down', 'left', 'right', 'stop']) {
         speech.last_event = {label: direction, sequence: visualSequence++, uptime_ms: visualSequence * 2000};
         await waitAttr('voice-pad', 'data-disabled', '0');
         await waitAttr('joy-knob', 'data-dir', direction);
+        await waitText('speech-timing', 'Inference 1.50 ms | max processing chunk 2.40 ms');
         assert(await page.$eval('#joy-knob', knob => {
           const k = knob.getBoundingClientRect();
           const j = knob.closest('.joystick').getBoundingClientRect();
