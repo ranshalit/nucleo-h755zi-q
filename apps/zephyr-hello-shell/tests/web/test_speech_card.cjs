@@ -11,7 +11,7 @@ function asset(name) {
   return [...match[1].matchAll(/"(?:\\.|[^"\\])*"/g)].map(x => JSON.parse(x[0])).join('');
 }
 let speech = {state: 'unavailable', reason: 'no ready USB microphone', label: null, score: null,
-  last_event: null, threshold_percent: 80, accept_frames: 3, rearm_ms: 300, min_gap_ms: 1000};
+  last_event: null, threshold_percent: 60, accept_frames: 2, rearm_ms: 300, min_gap_ms: 1000};
 let failSpeech = false;
 let failThreshold = false;
 let thresholdRequest = null;
@@ -66,9 +66,10 @@ async function main() {
     await waitText('speech-state', 'unavailable');
     await waitAttr('voice-pad', 'data-disabled', '1');
     assert.equal(await attr('joy-knob', 'data-dir'), 'stop');
-    await waitText('speech-threshold-active', 'Active threshold: 80%');
-    await waitText('speech-timing-active', 'Active acceptance: 3 frames | re-arm 300 ms | gap 1000 ms');
-    assert.equal(await page.$eval('#speech-frames-input', n => n.value), '3');
+    await waitText('speech-threshold-active', 'Active threshold: 60%');
+    await waitText('speech-timing-active', 'Active acceptance: 2 frames | re-arm 300 ms | gap 1000 ms');
+    assert.equal(await page.$eval('#speech-threshold-input', n => n.value), '60');
+    assert.equal(await page.$eval('#speech-frames-input', n => n.value), '2');
     speech = {...speech, accept_frames: 2, rearm_ms: 200, min_gap_ms: 700};
     await waitText('speech-timing-active', 'Active acceptance: 2 frames | re-arm 200 ms | gap 700 ms');
     assert.equal(await page.$eval('#speech-gap-input', n => n.value), '700');

@@ -16,6 +16,7 @@ enum speech_label {
 	SPEECH_LABEL_COUNT
 };
 #define SPEECH_WORDS "yes/no/up/down/left/right/stop"
+#define SPEECH_THRESHOLD_DEFAULT_PERCENT 60
 #define SPEECH_ACCEPT_FRAMES_MAX 10
 #define SPEECH_REARM_MS_MAX 2000
 #define SPEECH_MIN_GAP_MS_MAX 5000
@@ -25,7 +26,7 @@ struct speech_timing {
 	uint16_t rearm_ms;
 	uint16_t min_gap_ms;
 };
-#define SPEECH_TIMING_DEFAULT { .accept_frames = 3, .rearm_ms = 300, .min_gap_ms = 1000 }
+#define SPEECH_TIMING_DEFAULT { .accept_frames = 2, .rearm_ms = 300, .min_gap_ms = 1000 }
 static inline bool speech_timing_valid(const struct speech_timing *timing)
 {
 	return timing && timing->accept_frames >= 1 &&

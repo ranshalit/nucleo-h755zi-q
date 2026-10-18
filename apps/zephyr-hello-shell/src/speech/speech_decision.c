@@ -5,7 +5,7 @@
 void speech_decision_reset(struct speech_decision *decision)
 {
 	memset(decision, 0, sizeof(*decision));
-	decision->threshold_permille = 800;
+	decision->threshold_permille = SPEECH_THRESHOLD_DEFAULT_PERCENT * 10U;
 	decision->timing = (struct speech_timing)SPEECH_TIMING_DEFAULT;
 	decision->armed = true;
 	decision->quiet_since = -1;

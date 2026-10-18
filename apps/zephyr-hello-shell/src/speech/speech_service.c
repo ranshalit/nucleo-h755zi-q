@@ -8,7 +8,7 @@
 static struct k_spinlock lock;
 static struct speech_snapshot status = {
 	.state = SPEECH_UNAVAILABLE, .reason = "speech recognition unavailable in simulation",
-	.threshold_percent = 80, .timing = SPEECH_TIMING_DEFAULT
+	.threshold_percent = SPEECH_THRESHOLD_DEFAULT_PERCENT, .timing = SPEECH_TIMING_DEFAULT
 };
 
 #ifdef CONFIG_APP_SPEECH_AI
