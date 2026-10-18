@@ -57,6 +57,16 @@ async function main() {
     headless: false, args: ['--no-sandbox', '--disable-dev-shm-usage']});
   try {
     const page = await browser.newPage();
+    const pageErrors = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
+    await page.setViewport({width: 1280, height: 1000});
+    const screenshot = async name => {
+      if (!process.env.SCREENSHOT_DIR) { return; }
+      fs.mkdirSync(process.env.SCREENSHOT_DIR, {recursive: true});
+      await (await page.$('.speech-card')).screenshot({
+        path: path.join(process.env.SCREENSHOT_DIR, name + '.png')
+      });
+    };
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const waitText = (id, text) => page.waitForFunction((id, text) =>
       document.getElementById(id)?.textContent === text, {timeout: 5000}, id, text);
@@ -64,7 +74,19 @@ async function main() {
     const waitAttr = (id, name, value) => page.waitForFunction((id, name, value) =>
       document.getElementById(id)?.getAttribute(name) === value, {timeout: 5000}, id, name, value);
     await waitText('speech-state', 'unavailable');
+    assert.equal(await page.$eval('.speech-card h3', n => n.textContent), 'Mission Control');
+    assert(await page.$eval('.joystick', n => n.getBoundingClientRect().width >= 220),
+      'desktop joystick must be prominent');
+    const layout = await page.evaluate(() => {
+      const control = document.querySelector('.voice-console').getBoundingClientRect();
+      const telemetry = document.querySelector('.speech-telemetry').getBoundingClientRect();
+      return {controlRight: control.right, telemetryLeft: telemetry.left};
+    });
+    assert(layout.controlRight <= layout.telemetryLeft, 'desktop telemetry must sit beside joystick');
+    assert.equal(await page.$eval('#voice-pad', n => n.querySelectorAll('button, [role="button"]').length), 0,
+      'voice indicators must not imply click controls');
     await waitAttr('voice-pad', 'data-disabled', '1');
+    await screenshot('mission-control-unavailable');
     assert.equal(await attr('joy-knob', 'data-dir'), 'stop');
     await waitText('speech-threshold-active', 'Active threshold: 60%');
     await waitText('speech-timing-active', 'Active acceptance: 2 frames | re-arm 300 ms | gap 1000 ms');
@@ -117,6 +139,7 @@ async function main() {
     await waitAttr('joy-knob', 'data-dir', 'stop');
     await waitText('joy-knob', 'STOP');
     await waitText('voice-caption', 'Mode: stop');
+    await screenshot('mission-control-running');
     speech.last_event = {label: 'right', sequence: 7, uptime_ms: 24000};
     await waitAttr('joy-knob', 'data-dir', 'right');
     assert.match(await page.evaluate(() => document.body.textContent), /yes, no, up, down, left, right, stop/);
@@ -327,8 +350,56 @@ async function main() {
     assert.equal(await page4.$eval('#voice-no', n => n.getAttribute('data-pressed')), '0', 'stale no pressed after failed first poll');
     await page4.close();
     speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
+    await waitAttr('voice-pad', 'data-disabled', '1');
+    await page.emulateMediaFeatures([{name: 'prefers-reduced-motion', value: 'reduce'}]);
+    for (const selector of ['#joy-knob', '.joy-arrow', '#voice-yes', '#voice-pad']) {
+      assert.equal(await page.$eval(selector, n => getComputedStyle(n).transitionDuration), '0s',
+        selector + ' must respect reduced motion');
+    }
+    let visualSequence = 20;
+    for (const width of [720, 375, 320]) {
+      await page.setViewport({width, height: 1000});
+      const overflow = await page.$eval('.speech-card', card => {
+        const bounds = card.getBoundingClientRect();
+        return [...card.querySelectorAll('*')].filter(n => {
+          const r = n.getBoundingClientRect();
+          return r.width && (r.left < bounds.left - 1 || r.right > bounds.right + 1);
+        }).map(n => n.id || n.className);
+      });
+      assert.deepStrictEqual(overflow, [], 'speech content overflows at ' + width + 'px');
+      assert(await page.$eval('.speech-card', card => card.getBoundingClientRect().right <= innerWidth),
+        'speech card exceeds viewport at ' + width + 'px');
+      for (const selector of ['.speech-diagnostics', '.speech-settings', '#voice-caption']) {
+        assert(await page.$eval(selector, n => n.checkVisibility()), selector + ' must remain visible');
+      }
+      if (width === 375) { await screenshot('mission-control-mobile'); }
+      speech = {state: 'running', reason: 'recognizing', label: 'up', score: .91,
+        session: 3, threshold_percent: 60};
+      for (const direction of ['up', 'down', 'left', 'right', 'stop']) {
+        speech.last_event = {label: direction, sequence: visualSequence++, uptime_ms: visualSequence * 2000};
+        await waitAttr('voice-pad', 'data-disabled', '0');
+        await waitAttr('joy-knob', 'data-dir', direction);
+        assert(await page.$eval('#joy-knob', knob => {
+          const k = knob.getBoundingClientRect();
+          const j = knob.closest('.joystick').getBoundingClientRect();
+          const dx = (k.left + k.width / 2) - (j.left + j.width / 2);
+          const dy = (k.top + k.height / 2) - (j.top + j.height / 2);
+          const direction = knob.getAttribute('data-dir');
+          const aligned = direction === 'stop' ? Math.abs(dx) < 2 && Math.abs(dy) < 2 :
+            direction === 'up' ? dy < -20 && Math.abs(dx) < 2 :
+            direction === 'down' ? dy > 20 && Math.abs(dx) < 2 :
+            direction === 'left' ? dx < -20 && Math.abs(dy) < 2 :
+            dx > 20 && Math.abs(dy) < 2;
+          return aligned && k.left >= j.left && k.right <= j.right && k.top >= j.top && k.bottom <= j.bottom;
+        }), direction + ' knob position invalid at ' + width + 'px');
+      }
+      if (width === 375) { await screenshot('mission-control-mobile-running'); }
+      speech = {state: 'unavailable', reason: 'unplugged', label: null, score: null, last_event: null};
+      await waitAttr('voice-pad', 'data-disabled', '1');
+    }
+    assert.deepStrictEqual(pageErrors, [], 'dashboard browser errors');
     assert.equal(ledRequests, 0, 'speech changed LED state');
-    console.log('PASS: speech states, events, attempt peaks/glow, silence retention, stale/errors, thresholds and unchanged LEDs');
+    console.log('PASS: Mission Control layout/motion, speech states, events, peaks/history, stale/errors, settings and unchanged LEDs');
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));
