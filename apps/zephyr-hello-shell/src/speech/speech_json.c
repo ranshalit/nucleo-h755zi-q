@@ -96,6 +96,37 @@ int speech_snapshot_json(const struct speech_snapshot *snapshot, char *out, size
 	EMIT(",\"last_attempt\":");
 	ret = emit_attempt(out, capacity, &offset, &snapshot->attempts.last, false, labels);
 	if (ret) { return ret; }
+	static const char *const outcomes[] = {
+		"below_threshold", "tie", "frames", "rearm", "gap", "accepted"
+	};
+	const struct speech_history *history = &snapshot->history;
+	if (history->count > SPEECH_HISTORY_CAPACITY || history->next >= SPEECH_HISTORY_CAPACITY) {
+		return -EINVAL;
+	}
+	EMIT(",\"history\":[");
+	for (unsigned int i = 0; i < history->count; ++i) {
+		unsigned int index = (history->next + SPEECH_HISTORY_CAPACITY - history->count + i) %
+				     SPEECH_HISTORY_CAPACITY;
+		const struct speech_decision_frame *frame = &history->frames[index];
+		if (!frame->sequence || frame->uptime_ms < 0 ||
+		    frame->label < SPEECH_YES || frame->label >= SPEECH_LABEL_COUNT ||
+		    frame->score_permille > 1000 || frame->threshold_permille < 500 ||
+		    frame->threshold_permille > 1000 || frame->required < 1 ||
+		    frame->required > SPEECH_ACCEPT_FRAMES_MAX || frame->count > frame->required ||
+		    frame->gap_remaining_ms > SPEECH_MIN_GAP_MS_MAX ||
+		    (unsigned int)frame->outcome > SPEECH_DECISION_ACCEPTED) {
+			return -EINVAL;
+		}
+		EMIT("%s{\"sequence\":%u,\"uptime_ms\":%lld,\"label\":\"%s\","
+		     "\"score\":%u.%03u,\"threshold\":%u.%03u,\"count\":%u,\"required\":%u,"
+		     "\"armed\":%s,\"gap_remaining_ms\":%u,\"outcome\":\"%s\"}",
+		     i ? "," : "", frame->sequence, (long long)frame->uptime_ms,
+		     labels[frame->label], frame->score_permille / 1000, frame->score_permille % 1000,
+		     frame->threshold_permille / 1000, frame->threshold_permille % 1000,
+		     frame->count, frame->required, frame->armed ? "true" : "false",
+		     frame->gap_remaining_ms, outcomes[frame->outcome]);
+	}
+	EMIT("]");
 	EMIT("}");
 #undef EMIT
 	return (int)offset;

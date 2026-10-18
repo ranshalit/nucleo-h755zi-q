@@ -155,6 +155,8 @@ static void test_service(void)
 		if (snapshot.attempts.live.valid) { live = true; break; }
 	}
 	assert(live);
+	assert(snapshot.history.count > 0);
+	uint32_t history_sequence = snapshot.history.sequence;
 	++capture.missed;
 	speech_capture_changed(&capture);
 	speech_snapshot_get(&snapshot);
@@ -162,6 +164,7 @@ static void test_service(void)
 	assert(snapshot.threshold_percent == 65);
 	assert(!snapshot.attempts.live.valid && snapshot.attempts.last.valid);
 	assert(snapshot.attempts.last.interrupted);
+	assert(snapshot.history.sequence == history_sequence);
 	capture.ready = false;
 	capture.connected = false;
 	++capture.session;
@@ -169,6 +172,7 @@ static void test_service(void)
 	speech_snapshot_get(&snapshot);
 	assert(snapshot.state == SPEECH_UNAVAILABLE && !snapshot.prediction_valid);
 	assert(!snapshot.attempts.live.valid && !snapshot.attempts.last.valid);
+	assert(snapshot.history.count == 0 && snapshot.history.sequence == 0);
 	capture.ready = true;
 	capture.connected = true;
 	capture.sample_rate_hz = 44100;

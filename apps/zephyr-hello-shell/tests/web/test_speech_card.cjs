@@ -187,6 +187,33 @@ async function main() {
       threshold_percent: 80, live_attempt: null, last_attempt: attempt};
     const waitPeakText = (id, text) => page.waitForFunction((id, text) =>
       document.getElementById(id)?.textContent.includes(text), {timeout: 5000}, id, text);
+    await waitText('speech-history-status', 'Decision history unavailable on this firmware');
+    const frame = {sequence: 1, uptime_ms: 1000, label: 'up', score: .895,
+      threshold: .8, count: 1, required: 2, armed: true, gap_remaining_ms: 0, outcome: 'frames'};
+    speech.history = [frame, {...frame, sequence: 2, uptime_ms: 1100,
+      score: .84, count: 2, armed: false, gap_remaining_ms: 900, outcome: 'rearm'}];
+    await waitPeakText('speech-history', '89.5%');
+    await waitPeakText('speech-history', '84.0%');
+    await waitPeakText('speech-history', 'Consecutive 1/2');
+    await waitPeakText('speech-history', 'Consecutive 2/2');
+    await waitPeakText('speech-history', 'Waiting for quiet re-arm');
+    await waitPeakText('speech-history', 'Min gap: 900 ms remaining');
+    assert.equal(await attr('joy-knob', 'data-dir'), 'right', 'rejected history moved joystick');
+    assert.match(await page.$eval('#speech-history p:first-child', n => n.textContent), /84.0%/);
+    speech.threshold_percent = 90;
+    await waitText('speech-threshold-active', 'Active threshold: 90%');
+    assert.match(await page.$eval('#speech-history', n => n.textContent), /Threshold 80.0%/);
+    speech.history = Array.from({length: 20}, (_, i) => ({...frame, sequence: i + 1}));
+    await page.waitForFunction(() => document.getElementById('speech-history')?.children.length === 20);
+    speech.history[19] = {...speech.history[19], outcome: 'accepted', count: 2};
+    await waitPeakText('speech-history', 'Accepted');
+    assert.equal(await attr('joy-knob', 'data-dir'), 'right', 'history replay moved joystick');
+    speech.history[19] = {...speech.history[19], score: 1.1};
+    await waitText('speech-health', 'Invalid speech history response from board');
+    assert.doesNotMatch(await page.$eval('#speech-history', n => n.textContent), /110.0%/);
+    speech.history = [];
+    speech.threshold_percent = 80;
+    await waitText('speech-history', 'No keyword decision frames yet');
     await waitPeakText('speech-last-attempt', '67.4%');
     await waitPeakText('speech-last-attempt', '12.6 percentage points below');
     await page.evaluate(() => {
@@ -240,6 +267,7 @@ async function main() {
     await page.emulateMediaFeatures([{name: 'prefers-reduced-motion', value: 'no-preference'}]);
     failSpeech = true;
     await waitText('speech-attempt-status', 'Stale peaks: speech status unavailable');
+    await waitText('speech-history-status', 'Stale history: speech status unavailable');
     assert.match(await page.$eval('#speech-live-attempt', n => n.textContent), /90.0%/);
     assert.match(await page.$eval('#speech-last-attempt', n => n.textContent), /67.4%/);
     failSpeech = false;

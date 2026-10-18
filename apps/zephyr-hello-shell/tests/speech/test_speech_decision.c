@@ -26,9 +26,84 @@ static void reset_strict_decision(struct speech_decision *decision)
 	speech_decision_set_timing(decision, &(struct speech_timing){3, 300, 1000});
 }
 
+static void test_history(void)
+{
+	struct speech_decision d;
+	struct speech_history history = {0};
+	enum speech_label event;
+	uint16_t scores[SPEECH_LABEL_COUNT] = {0};
+	uint16_t quiet[SPEECH_LABEL_COUNT] = {900};
+	scores[SPEECH_UP] = 895;
+	reset_strict_decision(&d);
+	speech_decision_set_timing(&d, &(struct speech_timing){2, 300, 1000});
+	assert(!speech_decision_update(&d, scores, 0, &event));
+	speech_history_record(&history, &d);
+	assert(history.count == 1 && history.frames[0].score_permille == 895);
+	assert(history.frames[0].count == 1 && history.frames[0].required == 2);
+	assert(history.frames[0].outcome == SPEECH_DECISION_FRAMES);
+	assert(!speech_decision_update(&d, scores, 50, &event));
+	speech_history_record(&history, &d);
+	assert(history.count == 1);
+	scores[SPEECH_UP] = 840;
+	assert(speech_decision_update(&d, scores, 100, &event));
+	speech_history_record(&history, &d);
+	assert(history.frames[1].score_permille == 840 && history.frames[1].count == 2);
+	assert(history.frames[1].outcome == SPEECH_DECISION_ACCEPTED);
+	assert(history.frames[1].armed && history.frames[1].gap_remaining_ms == 0);
+	assert(!speech_decision_update(&d, scores, 200, &event));
+	speech_history_record(&history, &d);
+	assert(!history.frames[2].armed && history.frames[2].gap_remaining_ms == 900);
+	assert(history.frames[2].outcome == SPEECH_DECISION_REARM);
+	scores[SPEECH_UP] = 700;
+	assert(!speech_decision_update(&d, scores, 300, &event));
+	speech_history_record(&history, &d);
+	assert(history.frames[3].outcome == SPEECH_DECISION_BELOW && history.frames[3].count == 0);
+	assert(!speech_decision_update(&d, quiet, 600, &event));
+	speech_history_record(&history, &d);
+	assert(history.count == 4 && d.armed);
+	scores[SPEECH_UP] = 900;
+	assert(!speech_decision_update(&d, scores, 700, &event));
+	speech_history_record(&history, &d);
+	assert(!speech_decision_update(&d, scores, 800, &event));
+	speech_history_record(&history, &d);
+	assert(history.frames[5].outcome == SPEECH_DECISION_GAP);
+	assert(history.frames[5].armed && history.frames[5].gap_remaining_ms == 300);
+	scores[SPEECH_DOWN] = 900;
+	assert(!speech_decision_update(&d, scores, 900, &event));
+	speech_history_record(&history, &d);
+	assert(history.frames[6].outcome == SPEECH_DECISION_TIE && history.frames[6].count == 0);
+	speech_decision_set_threshold(&d, 950);
+	assert(history.frames[0].threshold_permille == 800);
+	for (int64_t t = 1000; t < 4000; t += 100) {
+		speech_decision_update(&d, scores, t, &event);
+		speech_history_record(&history, &d);
+	}
+	assert(history.count == SPEECH_HISTORY_CAPACITY);
+	assert(history.sequence == 37);
+	assert(history.frames[history.next].sequence == 18);
+	assert(history.frames[(history.next + SPEECH_HISTORY_CAPACITY - 1) %
+			      SPEECH_HISTORY_CAPACITY].uptime_ms == 3900);
+	history = (struct speech_history){0};
+	assert(history.count == 0 && history.sequence == 0);
+	reset_strict_decision(&d);
+	speech_decision_set_timing(&d, &(struct speech_timing){1, 100, 0});
+	scores[SPEECH_DOWN] = 0;
+	assert(speech_decision_update(&d, scores, 0, &event));
+	scores[SPEECH_UP] = 700;
+	assert(!speech_decision_update(&d, scores, 100, &event));
+	assert(!d.frame.armed);
+	assert(!speech_decision_update(&d, scores, 200, &event));
+	assert(d.frame.armed);
+	speech_history_record(&history, &d);
+	history.sequence = UINT32_MAX;
+	speech_history_record(&history, &d);
+	assert(history.frames[1].sequence == 1);
+	puts("PASS: individual decision scores, frame counts, blockers and bounded history");
+}
 int main(void)
 {
 	test_defaults();
+	test_history();
 	struct speech_decision decision;
 	enum speech_label event;
 	uint16_t yes[SPEECH_LABEL_COUNT] = {0,50,900,50}, no[SPEECH_LABEL_COUNT] = {0,50,50,900};

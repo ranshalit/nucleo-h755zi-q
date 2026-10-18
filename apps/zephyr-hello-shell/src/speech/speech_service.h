@@ -27,6 +27,30 @@ struct speech_timing {
 	uint16_t min_gap_ms;
 };
 #define SPEECH_TIMING_DEFAULT { .accept_frames = 2, .rearm_ms = 300, .min_gap_ms = 1000 }
+#define SPEECH_HISTORY_CAPACITY 20
+#define SPEECH_JSON_CAPACITY 12288
+enum speech_decision_outcome {
+	SPEECH_DECISION_BELOW, SPEECH_DECISION_TIE, SPEECH_DECISION_FRAMES,
+	SPEECH_DECISION_REARM, SPEECH_DECISION_GAP, SPEECH_DECISION_ACCEPTED
+};
+struct speech_decision_frame {
+	int64_t uptime_ms;
+	uint32_t sequence;
+	enum speech_label label;
+	uint16_t score_permille;
+	uint16_t threshold_permille;
+	uint16_t gap_remaining_ms;
+	uint8_t count;
+	uint8_t required;
+	bool armed;
+	enum speech_decision_outcome outcome;
+};
+struct speech_history {
+	struct speech_decision_frame frames[SPEECH_HISTORY_CAPACITY];
+	uint32_t sequence;
+	uint8_t count;
+	uint8_t next;
+};
 static inline bool speech_timing_valid(const struct speech_timing *timing)
 {
 	return timing && timing->accept_frames >= 1 &&
@@ -54,6 +78,7 @@ struct speech_snapshot {
 	uint8_t threshold_percent;
 	struct speech_timing timing;
 	struct speech_attempt_tracker attempts;
+	struct speech_history history;
 };
 int speech_service_start(void);
 int speech_service_set_threshold(uint8_t threshold_percent);

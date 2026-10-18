@@ -6,7 +6,7 @@
 #include "speech_service.h"
 int main(void)
 {
-	char buffer[3072];
+	char buffer[SPEECH_JSON_CAPACITY];
 	struct speech_snapshot snapshot = {
 		.state = SPEECH_UNAVAILABLE, .reason = "mic \"gone\"\n", .threshold_percent = 80,
 		.timing = SPEECH_TIMING_DEFAULT
@@ -15,6 +15,7 @@ int main(void)
 	assert(n > 0 && (size_t)n == strlen(buffer));
 	assert(strstr(buffer, "\"label\":null,\"score\":null"));
 	assert(strstr(buffer, "\"last_event\":null"));
+	assert(strstr(buffer, "\"history\":[]"));
 	assert(strstr(buffer, "\"threshold_percent\":80"));
 	assert(strstr(buffer, "\"live_attempt\":null,\"last_attempt\":null"));
 	assert(strstr(buffer, "mic \\\"gone\\\"\\u000a"));
@@ -93,6 +94,30 @@ int main(void)
 		snapshot.attempts.live.peaks[i] = snapshot.attempts.last.peaks[i] = 1000;
 	}
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) > 0);
+	snapshot.history.count = SPEECH_HISTORY_CAPACITY;
+	snapshot.history.next = 3;
+	for (unsigned int i = 0; i < SPEECH_HISTORY_CAPACITY; ++i) {
+		snapshot.history.frames[(3 + i) % SPEECH_HISTORY_CAPACITY] =
+			(struct speech_decision_frame){
+				.sequence = UINT32_MAX - SPEECH_HISTORY_CAPACITY + i,
+				.uptime_ms = INT64_MAX, .label = SPEECH_UP,
+				.score_permille = i ? 840 : 895, .threshold_permille = 800,
+				.count = 2, .required = 2, .armed = false,
+				.gap_remaining_ms = 5000, .outcome = SPEECH_DECISION_REARM
+			};
+	}
+	n = speech_snapshot_json(&snapshot, buffer, sizeof(buffer));
+	assert(n > 0);
+	assert(strstr(buffer, "\"label\":\"up\",\"score\":0.895,\"threshold\":0.800"));
+	assert(strstr(buffer, "\"count\":2,\"required\":2,\"armed\":false,\"gap_remaining_ms\":5000,\"outcome\":\"rearm\""));
+	assert(strstr(buffer, "\"score\":0.895") < strstr(buffer, "\"score\":0.840"));
+	assert(speech_snapshot_json(&snapshot, buffer, (size_t)n) == -ENOSPC);
+	snapshot.history.frames[3].label = SPEECH_LABEL_COUNT;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	snapshot.history.frames[3].label = SPEECH_UP;
+	snapshot.history.frames[3].outcome = SPEECH_DECISION_ACCEPTED + 1;
+	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
+	snapshot.history = (struct speech_history){0};
 	snapshot.label = SPEECH_LABEL_COUNT;
 	assert(speech_snapshot_json(&snapshot, buffer, sizeof(buffer)) == -EINVAL);
 	snapshot.label = SPEECH_YES;

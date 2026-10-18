@@ -77,7 +77,10 @@ static void capture_changed_locked(const struct usb_audio_snapshot *capture)
 	status.session = capture->session;
 	if (gap) { ++status.gaps; }
 	invalidate_locked();
-	if (new_session) { speech_attempt_reset(&status.attempts); }
+	if (new_session) {
+		speech_attempt_reset(&status.attempts);
+		status.history = (struct speech_history){0};
+	}
 	if (failed) { return; }
 	if (!capture->connected || !capture->ready) {
 		status.state = SPEECH_UNAVAILABLE;
@@ -221,6 +224,7 @@ static void run_worker(void *a, void *b, void *c)
 					int64_t now = k_uptime_get();
 					accepted = speech_decision_update(&decision, scores, now,
 									  &event);
+					speech_history_record(&status.history, &decision);
 					speech_attempt_update(&status.attempts, scores, winner, now,
 							      accepted, event);
 					if (accepted) {
@@ -294,7 +298,7 @@ void speech_snapshot_get(struct speech_snapshot *out)
 static int cmd_speech_status(const struct shell *shell, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc); ARG_UNUSED(argv);
-	struct speech_snapshot snapshot;
+	static struct speech_snapshot snapshot;
 	speech_snapshot_get(&snapshot);
 	shell_print(shell, "speech state=%d reason=%s session=%u windows=%u gaps=%u drops=%u",
 		    snapshot.state, snapshot.reason, snapshot.session, snapshot.windows,
