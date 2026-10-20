@@ -11,6 +11,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
@@ -110,6 +111,71 @@ K_THREAD_STACK_DEFINE(red_led_blink_stack, LED_BLINK_THREAD_STACK_SIZE);
 
 static struct k_thread yellow_led_blink_thread;
 static struct k_thread red_led_blink_thread;
+
+#if defined(CONFIG_APP_MPU_PROTECTION_TEST)
+#define MPU_PROBE_THREAD_STACK_SIZE 256
+K_THREAD_STACK_DEFINE(mpu_probe_stack, MPU_PROBE_THREAD_STACK_SIZE);
+static struct k_thread mpu_probe_thread_data;
+
+static void mpu_probe_thread(void *arg1, void *arg2, void *arg3)
+{
+	volatile uint32_t *address = arg1;
+	int write_access = POINTER_TO_INT(arg2);
+
+	if (write_access != 0) {
+		*address = 0xA5A5A5A5U;
+	} else {
+		volatile uint32_t value = *address;
+		ARG_UNUSED(value);
+	}
+	ARG_UNUSED(arg3);
+}
+
+static int cmd_mpu_probe(const struct shell *shell, size_t argc, char **argv)
+{
+	volatile uint32_t *address;
+	bool write_access;
+	k_tid_t tid;
+	int ret;
+
+	if (argc != 2) {
+		shell_error(shell,
+			    "usage: mpu_probe state-read|state-write|stack-read|stack-write");
+		return -EINVAL;
+	}
+
+	if ((strcmp(argv[1], "state-read") == 0) || (strcmp(argv[1], "state-write") == 0)) {
+		address = &red_led_region.led.info.blink_period_ms;
+	} else if ((strcmp(argv[1], "stack-read") == 0) ||
+		   (strcmp(argv[1], "stack-write") == 0)) {
+		address = (volatile uint32_t *)red_led_blink_stack;
+	} else {
+		shell_error(shell, "unknown probe mode");
+		return -EINVAL;
+	}
+
+	write_access = (strcmp(argv[1], "state-write") == 0) ||
+		       (strcmp(argv[1], "stack-write") == 0);
+
+	tid = k_thread_create(&mpu_probe_thread_data, mpu_probe_stack,
+			      K_THREAD_STACK_SIZEOF(mpu_probe_stack), mpu_probe_thread,
+			      (void *)address, INT_TO_POINTER(write_access), NULL,
+			      LED_BLINK_THREAD_PRIORITY, K_USER, K_FOREVER);
+	ret = k_mem_domain_add_thread(&yellow_led_domain, tid);
+	if (ret != 0) {
+		k_thread_abort(tid);
+		shell_error(shell, "could not assign probe memory domain: %d", ret);
+		return ret;
+	}
+
+	k_thread_name_set(tid, "mpu_probe");
+	shell_print(shell, "started %s; expected MPU fault", argv[1]);
+	k_thread_start(tid);
+	return 0;
+}
+
+SHELL_CMD_REGISTER(mpu_probe, NULL, "Test LED MPU isolation", cmd_mpu_probe);
+#endif
 
 struct board_led_error {
 	enum board_led_id led_id;

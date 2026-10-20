@@ -53,3 +53,8 @@ config APP_USB_HOST_ULPI_SLEEP_CLOCK_FIX
 	  Match Zephyr's STM32 USB device drivers: USB2's embedded FS PHY
 	  needs the unused ULPI clock disabled in CPU sleep. Disable only
 	  to reproduce the historical USB timing failure.
+
+config APP_MPU_PROTECTION_TEST
+	bool "Enable the test-only LED MPU cross-access probe"
+	depends on USERSPACE
+	default n
