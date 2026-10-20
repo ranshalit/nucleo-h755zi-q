@@ -230,6 +230,33 @@ build_app() {
 flash_app() {
   [[ -f "${BUILD_DIR}/zephyr/zephyr.hex" ]] || die "missing build artifact: ${BUILD_DIR}/zephyr/zephyr.hex"
 
+  local option_output bcm4_lines bcm4_count bcm4_line bcm4_token bcm4_value
+  log "reading BCM4 option byte"
+  if ! option_output="$("${PROGRAMMER}" -c "port=SWD" "freq=${SWD_FREQ}" -ob displ 2>&1)"; then
+    printf '%s\n' "${option_output}" >&2
+    die "failed to read option bytes from STM32 target"
+  fi
+  bcm4_lines="$(printf '%s\n' "${option_output}" | grep -E '^[[:space:]]*BCM4[[:space:]]*:' || true)"
+  bcm4_count="$(printf '%s\n' "${bcm4_lines}" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  if [[ "${bcm4_count}" != "1" ]]; then
+    printf '%s\n' "${option_output}" >&2
+    die "unable to parse BCM4 option byte from STM32_Programmer_CLI output"
+  fi
+  bcm4_line="$(printf '%s\n' "${bcm4_lines}" | head -n 1)"
+  bcm4_token="$(printf '%s\n' "${bcm4_line}" | cut -d: -f2- | xargs | awk '{print $1}')"
+  bcm4_value="${bcm4_token,,}"
+  case "${bcm4_value}" in
+    0|0x0)
+      ;;
+    1|0x1)
+      die "BCM4 option byte must be 0 before flashing bank2 sector0 firmware"
+      ;;
+    *)
+      printf '%s\n' "${option_output}" >&2
+      die "unable to parse BCM4 option byte from STM32_Programmer_CLI output"
+      ;;
+  esac
+
   log "flashing ${BUILD_DIR}"
   (
     cd "${ZEPHYR_BASE}"
