@@ -7,48 +7,80 @@
 #include <errno.h>
 #include <string.h>
 
+#include <zephyr/app_memory/mem_domain.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
+#define LED_USER_REGION_SIZE 64U
+
 struct board_led {
+	enum board_led_id id;
 	struct board_led_info info;
 	struct gpio_dt_spec gpio;
 };
 
-static struct board_led board_leds[] = {
-	{
-		.info =
-			{
-				.color = "green",
-				.label = "LD1",
-				.blinking = false,
-				.blink_period_ms = 0,
-			},
-		.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(green_led), gpios),
-	},
-	{
-		.info =
-			{
-				.color = "yellow",
-				.label = "LD2",
-				.blinking = true,
-				.blink_period_ms = 400U,
-			},
-		.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(yellow_led), gpios),
-	},
-	{
-		.info =
-			{
-				.color = "red",
-				.label = "LD3",
-				.blinking = true,
-				.blink_period_ms = 700U,
-			},
-		.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(red_led), gpios),
-	},
+struct board_led_region {
+	struct board_led led;
+	uint8_t padding[LED_USER_REGION_SIZE - sizeof(struct board_led)];
+} __aligned(LED_USER_REGION_SIZE);
+
+BUILD_ASSERT(sizeof(struct board_led) <= LED_USER_REGION_SIZE);
+BUILD_ASSERT(sizeof(struct board_led_region) == LED_USER_REGION_SIZE);
+
+static struct board_led green_led = {
+	.id = BOARD_LED_GREEN,
+	.info =
+		{
+			.color = "green",
+			.label = "LD1",
+			.blinking = false,
+			.blink_period_ms = 0,
+		},
+	.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(green_led), gpios),
+};
+
+static struct board_led_region yellow_led_region = {
+	.led =
+		{
+			.id = BOARD_LED_YELLOW,
+			.info =
+				{
+					.color = "yellow",
+					.label = "LD2",
+					.blinking = true,
+					.blink_period_ms = 400U,
+				},
+			.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(yellow_led), gpios),
+		},
+};
+
+static struct board_led_region red_led_region = {
+	.led =
+		{
+			.id = BOARD_LED_RED,
+			.info =
+				{
+					.color = "red",
+					.label = "LD3",
+					.blinking = true,
+					.blink_period_ms = 700U,
+				},
+			.gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(red_led), gpios),
+		},
+};
+
+K_MEM_PARTITION_DEFINE(yellow_led_partition, &yellow_led_region, sizeof(yellow_led_region),
+		       K_MEM_PARTITION_P_RW_U_RW);
+K_MEM_PARTITION_DEFINE(red_led_partition, &red_led_region, sizeof(red_led_region),
+		       K_MEM_PARTITION_P_RW_U_RW);
+
+static struct board_led *const board_leds[] = {
+	&green_led,
+	&yellow_led_region.led,
+	&red_led_region.led,
 };
 
 static const struct gpio_dt_spec user_button = GPIO_DT_SPEC_GET(DT_NODELABEL(user_button), gpios);
@@ -74,7 +106,7 @@ static struct board_led *board_led_from_id(enum board_led_id led_id)
 		return NULL;
 	}
 
-	return &board_leds[led_id];
+	return board_leds[led_id];
 }
 
 static void led_blink_thread(void *arg1, void *arg2, void *arg3)
@@ -107,7 +139,7 @@ int board_io_init(void)
 	}
 
 	for (size_t i = 0; i < ARRAY_SIZE(board_leds); ++i) {
-		if (!gpio_is_ready_dt(&board_leds[i].gpio)) {
+		if (!gpio_is_ready_dt(&board_leds[i]->gpio)) {
 			board_io_initialized = true;
 			board_io_init_status = -ENODEV;
 			return board_io_init_status;
@@ -121,7 +153,7 @@ int board_io_init(void)
 	}
 
 	for (size_t i = 0; i < ARRAY_SIZE(board_leds); ++i) {
-		ret = gpio_pin_configure_dt(&board_leds[i].gpio, GPIO_OUTPUT_INACTIVE);
+		ret = gpio_pin_configure_dt(&board_leds[i]->gpio, GPIO_OUTPUT_INACTIVE);
 		if (ret != 0) {
 			board_io_initialized = true;
 			board_io_init_status = ret;
@@ -156,15 +188,15 @@ int board_blink_threads_start(void)
 
 	k_tid_t yellow_tid = k_thread_create(&yellow_led_blink_thread, yellow_led_blink_stack,
 					     K_THREAD_STACK_SIZEOF(yellow_led_blink_stack),
-					     led_blink_thread, (void *)&board_leds[BOARD_LED_YELLOW],
+					     led_blink_thread, board_leds[BOARD_LED_YELLOW],
 					     INT_TO_POINTER(board_leds[BOARD_LED_YELLOW]
-								.info.blink_period_ms),
+								->info.blink_period_ms),
 					     NULL, LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
 	k_tid_t red_tid = k_thread_create(&red_led_blink_thread, red_led_blink_stack,
 					  K_THREAD_STACK_SIZEOF(red_led_blink_stack),
-					  led_blink_thread, (void *)&board_leds[BOARD_LED_RED],
+					  led_blink_thread, board_leds[BOARD_LED_RED],
 					  INT_TO_POINTER(board_leds[BOARD_LED_RED]
-							     .info.blink_period_ms),
+							     ->info.blink_period_ms),
 					  NULL, LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
 
 	k_thread_name_set(yellow_tid, "yellow_led_blink");
@@ -209,7 +241,7 @@ int board_led_find(const char *color, enum board_led_id *led_id)
 	}
 
 	for (size_t i = 0; i < ARRAY_SIZE(board_leds); ++i) {
-		if (strcmp(board_leds[i].info.color, color) == 0) {
+		if (strcmp(board_leds[i]->info.color, color) == 0) {
 			*led_id = (enum board_led_id)i;
 			return 0;
 		}
