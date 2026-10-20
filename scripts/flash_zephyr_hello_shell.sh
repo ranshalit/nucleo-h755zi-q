@@ -231,11 +231,12 @@ flash_app() {
   [[ -f "${BUILD_DIR}/zephyr/zephyr.hex" ]] || die "missing build artifact: ${BUILD_DIR}/zephyr/zephyr.hex"
 
   local option_output bcm4_lines bcm4_count bcm4_line bcm4_token bcm4_value
-  log "reading BCM4 option byte"
-  if ! option_output="$("${PROGRAMMER}" -c "port=SWD" "freq=${SWD_FREQ}" -ob displ 2>&1)"; then
+  log "reading BCM4 option byte under reset"
+  if ! option_output="$("${PROGRAMMER}" -c "port=SWD" "mode=UR" "freq=${SWD_FREQ}" -ob displ 2>&1)"; then
     printf '%s\n' "${option_output}" >&2
     die "failed to read option bytes from STM32 target"
   fi
+  option_output="$(printf '%s\n' "${option_output}" | sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g')"
   bcm4_lines="$(printf '%s\n' "${option_output}" | grep -E '^[[:space:]]*BCM4[[:space:]]*:' || true)"
   bcm4_count="$(printf '%s\n' "${bcm4_lines}" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
   if [[ "${bcm4_count}" != "1" ]]; then
@@ -260,7 +261,8 @@ flash_app() {
   log "flashing ${BUILD_DIR}"
   (
     cd "${ZEPHYR_BASE}"
-    PATH="$(dirname -- "${PROGRAMMER}"):${PATH}" "${WEST_BIN}" flash -d "${BUILD_DIR}" --runner stm32cubeprogrammer
+    PATH="$(dirname -- "${PROGRAMMER}"):${PATH}" "${WEST_BIN}" flash -d "${BUILD_DIR}" \
+      --runner stm32cubeprogrammer --conn-modifiers mode=UR
   )
 }
 
@@ -272,14 +274,10 @@ validate_uart() {
   STM32_PROGRAMMER_CLI="${PROGRAMMER}" \
   STM32_PROGRAMMER_SWD_FREQ="${SWD_FREQ}" \
   ZEPHYR_UART_VALIDATION_RETRIES="${VALIDATION_RETRIES}" \
-  ZEPHYR_BASE="${ZEPHYR_BASE}" \
-  ZEPHYR_BUILD_DIR="${BUILD_DIR}" \
-  WEST_BIN="${WEST_BIN}" \
   ZEPHYR_BOARD_TARGET="${BOARD}" \
   ZEPHYR_HOST_IPV4_ADDR="${HOST_IPV4_ADDR}" \
   ZEPHYR_BOARD_IPV4_ADDR="${BOARD_IPV4_ADDR}" \
   ZEPHYR_BOARD_IPV4_NETMASK="${BOARD_IPV4_NETMASK}" \
-  FLASH_BEFORE_VALIDATE="${FLASH_BEFORE_VALIDATE:-0}" \
   python3 - <<'PY'
 import json
 import os
@@ -298,11 +296,7 @@ PORT = os.environ["ZEPHYR_UART_PORT"]
 PROGRAMMER = os.environ["STM32_PROGRAMMER_CLI"]
 SWD_FREQ = os.environ["STM32_PROGRAMMER_SWD_FREQ"]
 RETRIES = int(os.environ["ZEPHYR_UART_VALIDATION_RETRIES"])
-ZEPHYR_BASE = os.environ["ZEPHYR_BASE"]
-BUILD_DIR = os.environ["ZEPHYR_BUILD_DIR"]
-WEST_BIN = os.environ["WEST_BIN"]
 BOARD = os.environ["ZEPHYR_BOARD_TARGET"]
-FLASH_BEFORE_VALIDATE = os.environ.get("FLASH_BEFORE_VALIDATE") == "1"
 HOST_IPV4_ADDR = os.environ["ZEPHYR_HOST_IPV4_ADDR"]
 BOARD_IPV4_ADDR = os.environ["ZEPHYR_BOARD_IPV4_ADDR"]
 BOARD_IPV4_NETMASK = os.environ["ZEPHYR_BOARD_IPV4_NETMASK"]
@@ -428,23 +422,6 @@ def has_mouse_snapshot(io: object) -> bool:
         and all(isinstance(presses.get(button), int) for button in
                 ("left", "right", "middle"))
     )
-
-def flash_build() -> None:
-    env = os.environ.copy()
-    env["PATH"] = f"{os.path.dirname(PROGRAMMER)}:{env['PATH']}"
-    proc = subprocess.run(
-        [WEST_BIN, "flash", "-d", BUILD_DIR, "--runner", "stm32cubeprogrammer"],
-        cwd=ZEPHYR_BASE,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-    print(proc.stdout, end="")
-    if proc.returncode != 0:
-        raise SystemExit(proc.returncode)
 
 def open_serial(timeout_sec: float = 10.0) -> serial.Serial:
     deadline = time.time() + timeout_sec
@@ -617,10 +594,6 @@ def attempt_validation(attempt: int) -> bool:
         ser = open_serial()
         ser.reset_input_buffer()
         ser.reset_output_buffer()
-
-        if FLASH_BEFORE_VALIDATE:
-            flash_build()
-            time.sleep(1.0)
 
         actions = [
             ("passive", None),
@@ -962,12 +935,10 @@ if [[ "${DO_BUILD}" -eq 1 ]]; then
   build_app
 fi
 
-if [[ "${DO_FLASH}" -eq 1 && "${DO_VALIDATE}" -eq 1 ]]; then
-  FLASH_BEFORE_VALIDATE=1 validate_uart
-elif [[ "${DO_FLASH}" -eq 1 ]]; then
+if [[ "${DO_FLASH}" -eq 1 ]]; then
   flash_app
 fi
 
-if [[ "${DO_VALIDATE}" -eq 1 && ! ( "${DO_FLASH}" -eq 1 ) ]]; then
+if [[ "${DO_VALIDATE}" -eq 1 ]]; then
   validate_uart
 fi

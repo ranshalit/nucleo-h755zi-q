@@ -22,16 +22,10 @@ cat > "$WORK_DIR/bin/STM32_Programmer_CLI" <<'EOF'
 printf '%s\n' "$@" > "$PROGRAMMER_ARGS"
 case "${FAKE_BCM4_MODE:-zero}" in
   zero)
-    cat <<'OUT'
-OPTION BYTES BANK:
-BCM4 : 0x0 (CM4 boot disabled)
-OUT
+    printf '\033[39;49m\033[39;49m\033[0m     BCM4 : 0x0 (CM4 boot disabled)\n'
     ;;
   one)
-    cat <<'OUT'
-OPTION BYTES BANK:
-BCM4 : 0x1 (CM4 boot enabled)
-OUT
+    printf '\033[39;49m\033[39;49m\033[0m     BCM4 : 0x1 (CM4 boot enabled)\n'
     ;;
   bad)
     echo "OPTION BYTES BANK: unavailable"
@@ -69,15 +63,35 @@ COMMON_ARGS=(
   --programmer "$WORK_DIR/bin/STM32_Programmer_CLI"
   --freq 1234
 )
+FLASH_WITH_VALIDATION_ARGS=(
+  --flash-only
+  --zephyr-base "$WORK_DIR/zephyr-base"
+  --app-dir "$WORK_DIR/app"
+  --build-dir "$WORK_DIR/build"
+  --programmer "$WORK_DIR/bin/STM32_Programmer_CLI"
+  --freq 1234
+)
 
 export WEST_ARGS="$WORK_DIR/west-args"
 export PROGRAMMER_ARGS="$WORK_DIR/programmer-args"
+
+cat > "$WORK_DIR/bin/python3" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$WORK_DIR/bin/python3"
+
+rm -f "$WEST_ARGS" "$PROGRAMMER_ARGS"
+check_failure 'BCM4 option byte must be 0' env PATH="$WORK_DIR/bin:$PATH" WEST_BIN="$WORK_DIR/bin/west" FAKE_BCM4_MODE=one bash "$RUNNER" "${FLASH_WITH_VALIDATION_ARGS[@]}"
+test ! -e "$WEST_ARGS"
+
 rm -f "$WEST_ARGS" "$PROGRAMMER_ARGS"
 check_failure 'BCM4 option byte must be 0' env WEST_BIN="$WORK_DIR/bin/west" FAKE_BCM4_MODE=one bash "$RUNNER" "${COMMON_ARGS[@]}"
 grep -Fqx -- 'port=SWD' "$PROGRAMMER_ARGS"
 grep -Fqx -- 'freq=1234' "$PROGRAMMER_ARGS"
 grep -Fqx -- '-ob' "$PROGRAMMER_ARGS"
 grep -Fqx -- 'displ' "$PROGRAMMER_ARGS"
+grep -Fqx -- 'mode=UR' "$PROGRAMMER_ARGS"
 test ! -e "$WEST_ARGS"
 
 rm -f "$WEST_ARGS"
@@ -93,5 +107,7 @@ env WEST_BIN="$WORK_DIR/bin/west" FAKE_BCM4_MODE=zero bash "$RUNNER" "${COMMON_A
 grep -Fqx -- 'flash' "$WEST_ARGS"
 grep -Fqx -- '--runner' "$WEST_ARGS"
 grep -Fqx -- 'stm32cubeprogrammer' "$WEST_ARGS"
+grep -Fqx -- '--conn-modifiers' "$WEST_ARGS"
+grep -Fqx -- 'mode=UR' "$WEST_ARGS"
 
 printf 'flash BCM4 guard tests passed\n'
