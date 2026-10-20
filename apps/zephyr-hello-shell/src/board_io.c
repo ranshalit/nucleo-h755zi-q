@@ -119,13 +119,13 @@ static struct k_thread mpu_probe_thread_data;
 
 static void mpu_probe_thread(void *arg1, void *arg2, void *arg3)
 {
-	volatile uint32_t *address = arg1;
+	volatile uint8_t *address = arg1;
 	int write_access = POINTER_TO_INT(arg2);
 
 	if (write_access != 0) {
-		*address = 0xA5A5A5A5U;
+		*address = 0xA5U;
 	} else {
-		volatile uint32_t value = *address;
+		volatile uint8_t value = *address;
 		ARG_UNUSED(value);
 	}
 	ARG_UNUSED(arg3);
@@ -133,7 +133,7 @@ static void mpu_probe_thread(void *arg1, void *arg2, void *arg3)
 
 static int cmd_mpu_probe(const struct shell *shell, size_t argc, char **argv)
 {
-	volatile uint32_t *address;
+	volatile uint8_t *address;
 	bool write_access;
 	k_tid_t tid;
 	int ret;
@@ -145,10 +145,10 @@ static int cmd_mpu_probe(const struct shell *shell, size_t argc, char **argv)
 	}
 
 	if ((strcmp(argv[1], "state-read") == 0) || (strcmp(argv[1], "state-write") == 0)) {
-		address = &red_led_region.led.info.blink_period_ms;
+		address = (volatile uint8_t *)&red_led_region.led.info.blink_period_ms;
 	} else if ((strcmp(argv[1], "stack-read") == 0) ||
 		   (strcmp(argv[1], "stack-write") == 0)) {
-		address = (volatile uint32_t *)red_led_blink_stack;
+		address = (volatile uint8_t *)K_THREAD_STACK_BUFFER(red_led_blink_stack);
 	} else {
 		shell_error(shell, "unknown probe mode");
 		return -EINVAL;
