@@ -254,12 +254,6 @@ int board_blink_threads_start(void)
 		return ret;
 	}
 
-	k_tid_t logger_tid =
-		k_thread_create(&board_io_error_thread, board_io_error_stack,
-				K_THREAD_STACK_SIZEOF(board_io_error_stack),
-				board_io_error_thread_entry, NULL, NULL, NULL,
-				LED_BLINK_THREAD_PRIORITY + 1, 0, K_NO_WAIT);
-
 	k_tid_t yellow_tid = k_thread_create(&yellow_led_blink_thread, yellow_led_blink_stack,
 					     K_THREAD_STACK_SIZEOF(yellow_led_blink_stack),
 					     led_blink_thread, &yellow_led_region.led,
@@ -289,6 +283,13 @@ int board_blink_threads_start(void)
 	k_object_access_grant(&board_io_lock, red_tid);
 	k_object_access_grant(red_led_region.led.gpio.port, red_tid);
 	k_object_access_grant(&board_io_error_queue, red_tid);
+
+	/* Created only after all fallible setup, so no failure path can leave it running. */
+	k_tid_t logger_tid =
+		k_thread_create(&board_io_error_thread, board_io_error_stack,
+				K_THREAD_STACK_SIZEOF(board_io_error_stack),
+				board_io_error_thread_entry, NULL, NULL, NULL,
+				LED_BLINK_THREAD_PRIORITY + 1, 0, K_NO_WAIT);
 
 	k_thread_name_set(logger_tid, "board_io_error");
 	k_thread_name_set(yellow_tid, "yellow_led_blink");
