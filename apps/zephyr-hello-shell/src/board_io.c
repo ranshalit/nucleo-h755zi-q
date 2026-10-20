@@ -77,6 +77,16 @@ K_MEM_PARTITION_DEFINE(yellow_led_partition, &yellow_led_region, sizeof(yellow_l
 K_MEM_PARTITION_DEFINE(red_led_partition, &red_led_region, sizeof(red_led_region),
 		       K_MEM_PARTITION_P_RW_U_RW);
 
+static struct k_mem_domain yellow_led_domain;
+static struct k_mem_domain red_led_domain;
+
+static struct k_mem_partition *yellow_led_partitions[] = {
+	&yellow_led_partition,
+};
+static struct k_mem_partition *red_led_partitions[] = {
+	&red_led_partition,
+};
+
 static struct board_led *const board_leds[] = {
 	&green_led,
 	&yellow_led_region.led,
@@ -88,6 +98,7 @@ static const struct gpio_dt_spec user_button = GPIO_DT_SPEC_GET(DT_NODELABEL(use
 static bool board_io_initialized;
 static int board_io_init_status;
 static bool blink_threads_started;
+static int blink_threads_start_error;
 
 static K_MUTEX_DEFINE(board_io_lock);
 
@@ -99,6 +110,40 @@ K_THREAD_STACK_DEFINE(red_led_blink_stack, LED_BLINK_THREAD_STACK_SIZE);
 
 static struct k_thread yellow_led_blink_thread;
 static struct k_thread red_led_blink_thread;
+
+struct board_led_error {
+	enum board_led_id led_id;
+	int error;
+};
+
+K_MSGQ_DEFINE(board_io_error_queue, sizeof(struct board_led_error), 4, 4);
+K_THREAD_STACK_DEFINE(board_io_error_stack, 1024);
+static struct k_thread board_io_error_thread;
+
+static void board_io_error_thread_entry(void *arg1, void *arg2, void *arg3)
+{
+	struct board_led_error error;
+	int ret;
+
+	ARG_UNUSED(arg1);
+	ARG_UNUSED(arg2);
+	ARG_UNUSED(arg3);
+
+	while (true) {
+		ret = k_msgq_get(&board_io_error_queue, &error, K_FOREVER);
+		if (ret != 0) {
+			printk("LED error queue receive failed: %d\n", ret);
+			continue;
+		}
+
+		if (error.led_id < BOARD_LED_GREEN || error.led_id >= BOARD_LED_COUNT) {
+			printk("LED error queue received invalid LED ID: %d\n", error.led_id);
+			continue;
+		}
+
+		printk("%s LED toggle failed: %d\n", board_leds[error.led_id]->info.color, error.error);
+	}
+}
 
 static struct board_led *board_led_from_id(enum board_led_id led_id)
 {
@@ -112,6 +157,7 @@ static struct board_led *board_led_from_id(enum board_led_id led_id)
 static void led_blink_thread(void *arg1, void *arg2, void *arg3)
 {
 	struct board_led *led = arg1;
+	struct board_led_error error;
 	const int blink_period_ms = POINTER_TO_INT(arg2);
 	int ret;
 
@@ -123,7 +169,12 @@ static void led_blink_thread(void *arg1, void *arg2, void *arg3)
 		k_mutex_unlock(&board_io_lock);
 
 		if (ret != 0) {
-			printk("%s LED toggle failed: %d\n", led->info.color, ret);
+			error.led_id = led->id;
+			error.error = ret;
+			ret = k_msgq_put(&board_io_error_queue, &error, K_FOREVER);
+			if (ret != 0) {
+				k_oops();
+			}
 		}
 
 		k_msleep(blink_period_ms);
@@ -186,21 +237,64 @@ int board_blink_threads_start(void)
 		return 0;
 	}
 
+	if (blink_threads_start_error != 0) {
+		return blink_threads_start_error;
+	}
+
+	ret = k_mem_domain_init(&yellow_led_domain, ARRAY_SIZE(yellow_led_partitions),
+				yellow_led_partitions);
+	if (ret != 0) {
+		blink_threads_start_error = ret;
+		return ret;
+	}
+
+	ret = k_mem_domain_init(&red_led_domain, ARRAY_SIZE(red_led_partitions), red_led_partitions);
+	if (ret != 0) {
+		blink_threads_start_error = ret;
+		return ret;
+	}
+
+	k_tid_t logger_tid =
+		k_thread_create(&board_io_error_thread, board_io_error_stack,
+				K_THREAD_STACK_SIZEOF(board_io_error_stack),
+				board_io_error_thread_entry, NULL, NULL, NULL,
+				LED_BLINK_THREAD_PRIORITY + 1, 0, K_NO_WAIT);
+
 	k_tid_t yellow_tid = k_thread_create(&yellow_led_blink_thread, yellow_led_blink_stack,
 					     K_THREAD_STACK_SIZEOF(yellow_led_blink_stack),
-					     led_blink_thread, board_leds[BOARD_LED_YELLOW],
-					     INT_TO_POINTER(board_leds[BOARD_LED_YELLOW]
-								->info.blink_period_ms),
-					     NULL, LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
+					     led_blink_thread, &yellow_led_region.led,
+					     INT_TO_POINTER(
+						     yellow_led_region.led.info.blink_period_ms),
+					     NULL, LED_BLINK_THREAD_PRIORITY, K_USER, K_FOREVER);
 	k_tid_t red_tid = k_thread_create(&red_led_blink_thread, red_led_blink_stack,
 					  K_THREAD_STACK_SIZEOF(red_led_blink_stack),
-					  led_blink_thread, board_leds[BOARD_LED_RED],
-					  INT_TO_POINTER(board_leds[BOARD_LED_RED]
-							     ->info.blink_period_ms),
-					  NULL, LED_BLINK_THREAD_PRIORITY, 0, K_NO_WAIT);
+					  led_blink_thread, &red_led_region.led,
+					  INT_TO_POINTER(red_led_region.led.info.blink_period_ms),
+					  NULL, LED_BLINK_THREAD_PRIORITY, K_USER, K_FOREVER);
 
+	ret = k_mem_domain_add_thread(&yellow_led_domain, yellow_tid);
+	if (ret == 0) {
+		ret = k_mem_domain_add_thread(&red_led_domain, red_tid);
+	}
+	if (ret != 0) {
+		k_thread_abort(yellow_tid);
+		k_thread_abort(red_tid);
+		blink_threads_start_error = ret;
+		return ret;
+	}
+
+	k_object_access_grant(&board_io_lock, yellow_tid);
+	k_object_access_grant(yellow_led_region.led.gpio.port, yellow_tid);
+	k_object_access_grant(&board_io_error_queue, yellow_tid);
+	k_object_access_grant(&board_io_lock, red_tid);
+	k_object_access_grant(red_led_region.led.gpio.port, red_tid);
+	k_object_access_grant(&board_io_error_queue, red_tid);
+
+	k_thread_name_set(logger_tid, "board_io_error");
 	k_thread_name_set(yellow_tid, "yellow_led_blink");
 	k_thread_name_set(red_tid, "red_led_blink");
+	k_thread_start(yellow_tid);
+	k_thread_start(red_tid);
 	blink_threads_started = true;
 
 	return 0;
