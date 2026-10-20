@@ -12,6 +12,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/libc-hooks.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
@@ -82,9 +83,15 @@ static struct k_mem_domain yellow_led_domain;
 static struct k_mem_domain red_led_domain;
 
 static struct k_mem_partition *yellow_led_partitions[] = {
+#if Z_LIBC_PARTITION_EXISTS
+	&z_libc_partition,
+#endif
 	&yellow_led_partition,
 };
 static struct k_mem_partition *red_led_partitions[] = {
+#if Z_LIBC_PARTITION_EXISTS
+	&z_libc_partition,
+#endif
 	&red_led_partition,
 };
 
