@@ -56,6 +56,56 @@ M7 Zephyr core, not the separate M4 core. `kernel thread list` also shows
 each thread's cumulative execution cycles and CPU percentage since boot;
 its `stack size ... (% ...)` lines instead report peak stack use, not CPU.
 
+For a one-command CTF capture, connect ST-LINK and run from the repository
+root (no separate OpenOCD or GDB terminal needed):
+
+```bash
+scripts/capture_zephyr_trace.sh
+```
+
+This snapshots the existing M7 RAM recording without resetting or flashing.
+It starts its own OpenOCD, halts M7 briefly to copy the data, resumes/detaches,
+and stops its OpenOCD. Stop other debug sessions first. Output includes
+`channel0_0` and CTF `metadata`, saved to a new timestamped directory under
+`~/zephyr-traces/`, outside the disposable build tree. Diagnostic logs live in
+its hidden `.capture/` subdirectory, separate from CTF stream files.
+
+To explicitly reset the board and wait 20 seconds before capturing a fresh
+boot recording:
+
+```bash
+scripts/capture_zephyr_trace.sh --reset --seconds 20
+```
+
+`--seconds` requires `--reset` and defaults to 20 when reset is requested.
+It controls the wait before dumping, **not** recording duration: the finite
+16 KiB buffer stops recording when full. Reset clears any previous recording.
+If snapshot attachment fails immediately after flashing, use `--reset` only
+when clearing the recording and restarting the board is acceptable.
+
+The default ELF is `build/zephyr-hello-shell/zephyr/zephyr.elf`; it must match
+the flashed image. Override it for the flash script's default build:
+
+```bash
+scripts/capture_zephyr_trace.sh \
+  --elf /tmp/stm32h7-zephyr-hello-shell/zephyr/zephyr.elf \
+  --output "$HOME/zephyr-traces/my-capture"
+```
+
+`--output` must name a new directory. Use the Zephyr checkout/metadata matching
+the flashed firmware. Debugger helper environment overrides apply; see
+`scripts/capture_zephyr_trace.sh --help`. Python 3 is used for host-side checks;
+GDB Python support is not required. On failure, inspect the printed log
+directory; a recovery debugger session attempts to resume/detach if extraction
+fails.
+
+Check a recording with `babeltrace2 <capture-directory>`. In Trace Compass,
+use **File > Import > Tracing > Traces**, select the capture directory, then
+right-click the imported trace and choose **Open**. Select generic **CTF**
+if a trace type is requested. For the task timeline, follow the XML-analysis
+instructions below. Old imports pointing into a deleted build directory
+will not work; import the persistent capture instead.
+
 The M7 board build also records Zephyr scheduler/interrupt events as CTF in a
 16 KiB RAM buffer. This is a finite snapshot: recording stops when the buffer
 fills, and a reset clears it. To view it with the open-source Eclipse Trace
