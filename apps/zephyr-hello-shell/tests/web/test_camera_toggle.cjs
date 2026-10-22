@@ -27,8 +27,8 @@ function streamBytes(ms) {
   });
   try {
     const page = await browser.newPage();
-    await page.goto(base, { waitUntil: 'load' });
-    await sleep(1000);
+    await page.goto(base, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => document.getElementById('camera-image').naturalWidth > 0);
 
     const state = () => page.evaluate(() => {
       const img = document.getElementById('camera-image');
@@ -42,13 +42,9 @@ function streamBytes(ms) {
 
     let s = await state();
     console.log('initial:', s);
-    if (!s.hidden || s.src) { fail('camera must be hidden and disconnected by default'); }
-
-    await page.click('#camera-toggle');
-    await sleep(2500);
-    s = await state();
-    console.log('shown:', s);
-    if (s.hidden || !(s.width > 0) || s.label !== 'Hide camera') { fail('expected camera frames after Show'); }
+    if (s.hidden || !s.src || !(s.width > 0) || s.label !== 'Hide camera') {
+      fail('camera must be visible and streaming by default');
+    }
 
     const t0 = Date.now();
     const io = await page.evaluate(() => fetch('/api/v1/io').then((r) => r.status));
@@ -64,6 +60,14 @@ function streamBytes(ms) {
     const bytes = await streamBytes(2500);
     console.log('second client bytes after Hide:', bytes);
     if (!(bytes > 1000)) { fail('stream should be free for another client after Hide'); }
+
+    await page.click('#camera-toggle');
+    await page.waitForFunction(() => document.getElementById('camera-image').naturalWidth > 0);
+    s = await state();
+    console.log('shown again:', s);
+    if (s.hidden || !s.src || !(s.width > 0) || s.label !== 'Hide camera') {
+      fail('expected camera frames after Show');
+    }
 
     if (!process.exitCode) { console.log('PASS'); }
   } finally {

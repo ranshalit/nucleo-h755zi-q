@@ -1779,6 +1779,7 @@ WEB_ASSET_DATA const uint8_t board_http_app_js[] =
     "\n"
     "  function startApp() {\n"
     "    cacheDom();\n"
+    "    setCameraVisible(true);\n"
     "    if (dom.refreshButton) {\n"
     "      dom.refreshButton.onclick = function () {\n"
     "        refreshDashboard(true);\n"
