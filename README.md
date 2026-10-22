@@ -665,6 +665,109 @@ ping -c 1 192.168.55.2
 validation. Override the defaults with `--host-ipv4`, `--board-ipv4`, and
 `--board-netmask` if your lab network uses different addresses.
 
+### Ethernet bandwidth testing with iperf
+
+Use the upstream Zephyr `samples/net/zperf` firmware with **host iperf v2**
+(`iperf`, not `iperf3`). There is no Linux or iperf executable on the board:
+zperf runs on Zephyr and is controlled through the UART shell.
+
+The benchmark temporarily replaces the dashboard firmware, so camera, speech,
+and other application tasks do not run during measurement. These results measure
+standalone Zephyr networking, not dashboard throughput under application load or
+the absolute hardware maximum.
+
+From the repository root:
+
+```bash
+scripts/flash_zephyr_zperf.sh --build-only  # Optional: build without flashing
+scripts/flash_zephyr_zperf.sh              # Build, save dashboard HEX, flash zperf
+scripts/flash_zephyr_zperf.sh --help
+```
+
+The script uses the Zephyr SDK ARM toolchain and a separate build directory,
+`build/zephyr-bandwidth`. Before flashing, it saves the dashboard build's HEX
+once to `build/zperf-dashboard-backup/zephyr/zephyr.hex`. Ensure
+`build/zephyr-hello-shell/zephyr/zephyr.hex` matches the dashboard firmware you
+want to restore. An existing backup is retained, not refreshed automatically.
+The script builds/flashes only; run the measurements separately as below.
+
+Connect the host and board by Ethernet. The benchmark configuration uses board
+address `192.168.55.2/24` and host address `192.168.55.101/24`. Confirm
+`ip route get 192.168.55.2` selects the board-facing NIC, not a leftover `zeth`
+interface. Open the board's ST-LINK UART (`/dev/ttyACM0` on the test host) at
+115200 baud, with only one serial client accessing the port.
+
+**Host to board:** start the receivers in the board's UART shell:
+
+```text
+net iface
+zperf tcp download 5001
+zperf udp download 5001
+```
+
+Then run on the host:
+
+```bash
+# Repeat the TCP command three times for separate 10-second measurements.
+iperf -c 192.168.55.2 -B 192.168.55.101 -p 5001 -t 10 -f m
+
+# Repeat UDP at 20M, 50M, and 90M; inspect receiver throughput and packet loss.
+iperf -u -c 192.168.55.2 -B 192.168.55.101 -p 5001 -t 10 -b 90M -l 1470 -f m
+```
+
+**Board to host:** start a TCP receiver on the host:
+
+```bash
+iperf -s -B 192.168.55.101 -p 5001 -i 10 -f m
+```
+
+Issue this command three times in the board's UART shell, waiting for each
+10-second transfer to complete:
+
+```text
+zperf tcp upload 192.168.55.101 5001 10 1064
+```
+
+For UDP, stop the host TCP receiver and start:
+
+```bash
+iperf -s -u -B 192.168.55.101 -p 5001 -i 10 -f m
+```
+
+Then issue in the board's UART shell:
+
+```text
+zperf udp upload 192.168.55.101 5001 10 1064 90M
+```
+
+The 2026-10-22 run used the same sequence, but requested a 1460-byte TCP upload
+payload. zperf warned and capped it to 1064 bytes; the commands above use that
+effective size explicitly. The benchmark uses 32 KiB TCP send/receive windows.
+
+| Measurement | Host to board | Board to host |
+| --- | --- | --- |
+| TCP, three 10-second runs, host iperf reporting | 94.6–94.7 Mbps | 78.2–78.5 Mbps |
+| UDP, highest tested offered rate | 93.3 Mbps, 0.25% loss | 77.3 Mbps, zero loss |
+
+The link negotiated 100 Mbps full duplex. For comparison, the raw line rate is
+12.5 MB/s per direction; ideal TCP payload throughput with MTU 1500 is about
+95 Mbps before TCP options and application overhead. The UDP `-b` argument is
+the requested rate, not proof of achieved throughput; use the receiver report.
+Local measurement logs are under `build/zephyr-bandwidth/results/`.
+
+**Restore the dashboard after testing:**
+
+```bash
+scripts/flash_zephyr_zperf.sh --restore
+```
+
+This **reflashes the saved HEX from the host to the STM32 over ST-LINK/SWD**.
+STM32CubeProgrammer writes internal flash, verifies the data, and resets the
+board so the dashboard starts again. It does not rebuild the application or
+switch an on-device rollback slot. The backup is a host-side firmware file,
+not a snapshot of runtime RAM or application state. Stop the host iperf receiver
+when finished.
+
 ### HTTP validation
 
 With Ethernet link up, the board also serves HTTP on the same static IPv4
