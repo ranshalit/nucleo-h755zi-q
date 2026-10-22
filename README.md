@@ -49,6 +49,33 @@ The repo-owned Zephyr application is:
 It keeps the application and shell configuration in this repository instead of
 patching the upstream Zephyr source tree under `vendor/zephyrproject/zephyr`.
 
+The M7 build combines upstream board defaults with app-specific overrides.
+Paths below are relative to the repository root:
+
+| Layer | File |
+| --- | --- |
+| Board devicetree | `vendor/zephyrproject/zephyr/boards/st/nucleo_h755zi_q/nucleo_h755zi_q_stm32h755xx_m7.dts` |
+| Shared board devicetree definitions | `vendor/zephyrproject/zephyr/boards/st/nucleo_h755zi_q/nucleo_h755zi_q.dtsi` |
+| Board default Kconfig settings | `vendor/zephyrproject/zephyr/boards/st/nucleo_h755zi_q/nucleo_h755zi_q_stm32h755xx_m7_defconfig` |
+| App devicetree overrides | `apps/zephyr-hello-shell/boards/nucleo_h755zi_q_stm32h755xx_m7.overlay` |
+| App board-specific configuration | `apps/zephyr-hello-shell/boards/nucleo_h755zi_q_stm32h755xx_m7.conf` |
+| Common app configuration | `apps/zephyr-hello-shell/prj.conf` |
+
+The devicetree overlay contains these app-specific hardware settings:
+
+| Override | Purpose |
+| --- | --- |
+| PD10 USB VBUS control | Drive PD10 high at startup to disable the active-low USB power switch until the app controls it. |
+| ADC3 and die-temperature sensor | Enable the internal temperature sensor and configure the ADC clock source and prescaler. |
+| Speech-model flash region | Declare 128 KiB at `0x08120000` in flash bank 2 for model data; M4 boot is disabled separately in the board-specific `.conf`. |
+| SRAM3 memory attributes | Mark Ethernet DMA descriptor/buffer memory non-cacheable so CPU accesses bypass D-cache while other memory can remain cacheable. |
+
+After a VS Code build, inspect the merged devicetree in
+`build/zephyr-hello-shell/zephyr/zephyr.dts` and the resolved Kconfig settings in
+`build/zephyr-hello-shell/zephyr/.config`. The flash script's default build
+directory puts these files under `/tmp/stm32h7-zephyr-hello-shell/zephyr/`
+instead. Edit the app's `.overlay` and `.conf` files, not these generated files.
+
 CPU runtime statistics are enabled for this app. On the UART shell, run
 `cpu usage` for CPU busy/idle percentages over 1 second, or
 `cpu usage 5000` for a 5-second interval (1–60000 ms). This measures the
