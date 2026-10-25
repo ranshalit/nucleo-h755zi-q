@@ -7,10 +7,10 @@
 #include <errno.h>
 #include <string.h>
 
+#include <zephyr/kernel.h>
 #include <zephyr/app_memory/mem_domain.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/libc-hooks.h>
 #include <zephyr/sys/printk.h>

@@ -75,7 +75,7 @@ for command in commands.splitlines():
         if os.environ.get("FAIL_DUMP"):
             print("memory read failed", file=sys.stderr)
             raise SystemExit(1)
-        data = (struct.pack("<IBI20s", 123456, 0x11, 0x24000000, b"demo")
+        data = (struct.pack("<IHI20s", 123456, 0x11, 0x24000000, b"demo")
                 if os.environ.get("TEST_VALID_CTF") else b"x" * pos)
         # GDB's dump command splits on whitespace, keeping filename quotes.
         Path(command.split()[3]).write_bytes(data)
@@ -246,7 +246,7 @@ else:
 
     @unittest.skipUnless(shutil.which("babeltrace2"), "babeltrace2 not installed")
     def test_capture_directory_decodes_with_babeltrace(self):
-        result = self.run_capture(extra_env={"TEST_VALID_CTF": "1", "TEST_POS": "29"})
+        result = self.run_capture(extra_env={"TEST_VALID_CTF": "1", "TEST_POS": "30"})
         self.assertEqual(result.returncode, 0, result.stderr)
         decoded = subprocess.run(
             ["babeltrace2", str(self.output)], capture_output=True, text=True,
