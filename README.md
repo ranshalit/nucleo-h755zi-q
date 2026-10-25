@@ -1202,6 +1202,66 @@ Fixture audio is test input, not live recognition. The fixture also runs
 on the Cortex-M7 `mps2/an500` QEMU target. In an isolated worktree, set
 `ZEPHYR_BASE` to the shared Zephyr source path for builds.
 
+## Scripts
+
+The repository's helper scripts are grouped below by what they do. Run them
+from the repository root unless their usage says otherwise; scripts that accept
+`--help` can show their options.
+
+### Build, run, flash, and debug
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/flash_zephyr_hello_shell.sh` | Build, flash, and validate the Zephyr hello-shell app on the NUCLEO-H755ZI-Q. |
+| `scripts/run_zephyr_hello_shell_native.sh` | Build and run the app with Zephyr `native_sim`, using localhost or TAP networking. |
+| `scripts/run_zephyr_hello_shell_qemu.sh` | Build and run the app on QEMU's MPS2 AN500 Cortex-M7 machine. |
+| `scripts/flash_zephyr_zperf.sh` | Build and flash Zephyr's zperf network benchmark, and optionally restore the saved dashboard image. |
+| `scripts/flash_gpio_demo.sh` | Build and/or flash the STM32Cube GPIO reference app for both CM7 and CM4. |
+| `scripts/debug_zephyr_hello_shell.sh` | Start OpenOCD for ST-LINK debugging of the running M7 app; does not flash. |
+| `scripts/gdb_zephyr_hello_shell.sh` | Locate the Zephyr SDK GDB executable and forward its arguments. |
+
+### Capture, measure, and test
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/capture_zephyr_trace.sh` | Capture the running M7's RAM-resident CTF trace over ST-LINK/OpenOCD and save it with metadata. |
+| `scripts/test_capture_zephyr_trace.py` | Test trace capture behavior using fake OpenOCD and GDB tools. |
+| `scripts/measure_zephyr_boot_time.sh` | Measure repeated hardware-reset-to-shell-prompt boot times; supports text or JSON output. |
+| `scripts/measure_zephyr_boot_time.py` | UART and STM32CubeProgrammer implementation used by the boot-time shell wrapper. |
+| `scripts/test_run_zephyr_hello_shell_native.sh` | Test native_sim runner build, run, profile, and error-handling behavior with a fake `west`. |
+| `scripts/test_flash_zephyr_hello_shell.sh` | Test the flash flow's CM4 boot-option safety guard and programmer invocation using fakes. |
+| `scripts/test_zephyr_speech.sh` | Run host-side speech C tests, optionally building and running native_sim model fixtures with `--model`. |
+| `scripts/run_usb_enumerator_tests.sh` | Compile and run the USB host enumerator's C unit tests. |
+| `scripts/run_mjpeg_multipart_tests.sh` | Compile and run the multipart MJPEG response C unit tests. |
+| `scripts/test_convert_video_to_mjpeg_frames.sh` | Test video-to-C conversion, generated-source compilation, frame count, and flash-budget rejection. |
+| `scripts/capture_usb_worker_trial.py` | Capture UART diagnostics for a timed USB worker trial without recording audio; supports event/polling and mouse/microphone modes. |
+
+### Speech and model tools
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/record_speech_session.py` | Record a labeled board microphone session as raw MIC1 data and matching 16 kHz mono WAV. |
+| `scripts/train_speech_keywords.sh` | Train the on-board tiny_conv keyword model using Speech Commands v0.02 and export it for firmware. |
+| `scripts/export_speech_keywords.py` | Convert a frozen tiny_conv SavedModel to the firmware-compatible int8 TFLite model. |
+| `scripts/dscnn/dump_features.py` | Export quantized micro-frontend keyword features from the Speech Commands dataset. |
+| `scripts/dscnn/train_dscnn.py` | Train and evaluate a DS-CNN keyword classifier on exported features, then produce an int8 TFLite model. |
+| `scripts/dscnn/convert_static.py` | Convert a saved DS-CNN model to int8 TFLite using representative features and check its input quantization. |
+
+### Document and camera utilities
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/convert_pdfs_to_md.py` | Convert PDFs to page-structured Markdown using Poppler text extraction and optional OCR of embedded images. |
+| `scripts/convert_video_to_mjpeg_frames.py` | Convert a video segment to JPEG frames and generate C source/header arrays for firmware MJPEG streaming. |
+
+### Supporting files
+
+| File | Purpose |
+| --- | --- |
+| `scripts/zephyr-ctf-scheduling.xml` | Trace Compass XML analysis for visualizing Zephyr task CPU scheduling from CTF traces. |
+| `scripts/zperf/benchmark.conf` | Kconfig additions for the zperf network benchmark build. |
+| `scripts/zperf/benchmark.overlay` | Devicetree overlay for the zperf benchmark build. |
+
 ## STM32CubeIDE reference build
 
 The verified STM32Cube reference baseline is vendored under:
