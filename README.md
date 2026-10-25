@@ -98,6 +98,8 @@ The M7 configuration is tickless with `CONFIG_SYS_CLOCK_TICKS_PER_SEC=1000000`;
 tickless mode suppresses periodic ticks but the configured tick rate still
 sets the kernel's timekeeping resolution. The command has been build-verified,
 but its runtime measurements have not yet been validated on hardware.
+See [latency testing](#standalone-latency-testing-with-zyclictest) for the
+standalone benchmark and measurement under webserver load.
 
 For a one-command CTF capture, connect ST-LINK and run from the repository
 root (no separate OpenOCD or GDB terminal needed):
@@ -814,6 +816,109 @@ switch an on-device rollback slot. The backup is a host-side firmware file,
 not a snapshot of runtime RAM or application state. Stop the host iperf receiver
 when finished.
 
+### Standalone latency testing with zyclictest
+
+For an idle M7 latency baseline without dashboard, USB, networking, or speech
+workloads, use the upstream Zephyr shell sample with `zyclictest` enabled.
+Like the iperf helper, this temporarily replaces the dashboard firmware:
+
+```bash
+source "$HOME/.venvs/zephyr-4.4/bin/activate"  # Existing Python 3.12+ Zephyr environment
+scripts/flash_zephyr_zyclictest.sh --build-only  # Optional: build without flashing
+scripts/flash_zephyr_zyclictest.sh              # Build, save dashboard HEX, flash
+scripts/flash_zephyr_zyclictest.sh --help
+```
+
+The helper uses the Zephyr SDK, a separate `build/zephyr-zyclictest/` directory,
+and saves the dashboard HEX once to
+`build/zyclictest-dashboard-backup/zephyr/zephyr.hex`. Ensure
+`build/zephyr-hello-shell/zephyr/zephyr.hex` matches the firmware you want restored.
+Override these paths with `ZYCLICTEST_BUILD_DIR`, `ZYCLICTEST_DASHBOARD_BUILD_DIR`,
+and `ZYCLICTEST_BACKUP_DIR`; use a new backup directory to preserve a newer
+dashboard build. Linked worktrees also need `ZEPHYR_BASE` pointing to the shared
+Zephyr checkout and `ZYCLICTEST_DASHBOARD_BUILD_DIR` pointing to the dashboard build.
+
+On the ST-LINK UART shell at 115200 baud, run a roughly 10-second measurement:
+
+```text
+uart:~$ zyclictest start -i 400 -p -11 -l 25000
+```
+
+Wait for `Finished thread with count: 25000`, then retrieve IRQ and thread
+minimum/average/maximum latency in microseconds:
+
+```text
+uart:~$ zyclictest stop -q
+```
+
+Use `zyclictest stop` instead for the full histogram, or
+`zyclictest stop -c -q` to cancel a loop-mode run early. Always stop the previous
+run before starting another, and do not issue `stop` before the first run.
+The benchmark enables tickless scheduling with 1 MHz kernel timekeeping and
+M7 instruction/data caches. Histogram range is 0-999 us; nonzero overflow counts
+mean samples exceeded that range, making histogram-derived averages unreliable.
+Choose an interval at least twice the expected worst-case latency.
+This is a baseline measurement, not a guaranteed worst-case bound; to measure
+latency under real application load, use the dashboard's existing `zyclictest`
+command instead.
+
+On NUCLEO-H755ZI-Q with Zephyr v4.4.0 (2026-10-25), the 25,000-cycle run above
+reported maximum IRQ latency **3 us**, maximum thread latency **6 us**, and
+zero overflows. A separate 2,500-cycle run also produced the histogram.
+These short idle measurements are observations, not worst-case guarantees.
+
+Restore the saved dashboard image over ST-LINK/SWD:
+
+```bash
+scripts/flash_zephyr_zyclictest.sh --restore
+```
+
+Restore writes and verifies the saved host-side HEX and resets the board.
+It does not restore runtime RAM state. No automatic benchmark or UART validation
+is performed by the helper.
+
+#### Measuring latency under webserver workload
+
+The M7 webserver application already enables `CONFIG_ZYCLICTEST_SHELL=y`,
+`CONFIG_TICKLESS_KERNEL=y`, and `CONFIG_SYS_CLOCK_TICKS_PER_SEC=1000000` in
+`apps/zephyr-hello-shell/boards/nucleo_h755zi_q_stm32h755xx_m7.conf`.
+No extra application code is needed.
+
+Restore the saved dashboard with the command above, or build and flash the
+current application from the repository root:
+
+```bash
+source "$HOME/.venvs/zephyr-4.4/bin/activate"
+scripts/flash_zephyr_hello_shell.sh --build-dir "$PWD/build/zephyr-hello-shell"
+```
+
+Start measurement on the UART shell:
+
+```text
+uart:~$ zyclictest start -i 400 -p -11 -l 25000
+```
+
+During the next approximately 10 seconds, exercise the web dashboard and the
+USB, network, or speech workload being evaluated. Wait for
+`Finished thread with count: 25000`, then print results and clean up:
+
+```text
+uart:~$ zyclictest stop -q
+```
+
+Compare IRQ and thread min/avg/max latency and overflow counts against the
+standalone baseline using the same interval, priority, and loop count.
+Priority `-11` probes a high-priority cooperative thread; it does not measure
+HTTP response time or the scheduling latency of every application thread.
+The standalone results above do not validate latency under dashboard load.
+
+**Always stop a completed run before starting another.** Loop completion does
+not release the test's thread handle. A repeated `start` can report
+`zyclictest already running` (`-16`, busy). In this upstream version, that
+rejected command also resets measurement counters, so subsequent `stop` can
+divide by zero. If this happens, reset the board and begin a fresh measurement
+rather than trusting the old results.
+
 ### HTTP validation
 
 With Ethernet link up, the board also serves HTTP on the same static IPv4
@@ -1235,6 +1340,8 @@ from the repository root unless their usage says otherwise; scripts that accept
 | `scripts/run_zephyr_hello_shell_native.sh` | Build and run the app with Zephyr `native_sim`, using localhost or TAP networking. |
 | `scripts/run_zephyr_hello_shell_qemu.sh` | Build and run the app on QEMU's MPS2 AN500 Cortex-M7 machine. |
 | `scripts/flash_zephyr_zperf.sh` | Build and flash Zephyr's zperf network benchmark, and optionally restore the saved dashboard image. |
+| `scripts/flash_zephyr_zyclictest.sh` | Build and flash a standalone zyclictest latency benchmark, or restore the saved dashboard image. |
+| `scripts/test_flash_zephyr_zyclictest.sh` | Check zyclictest helper actions, backup preservation, and failure handling without hardware. |
 | `scripts/flash_gpio_demo.sh` | Build and/or flash the STM32Cube GPIO reference app for both CM7 and CM4. |
 | `scripts/debug_zephyr_hello_shell.sh` | Start OpenOCD for ST-LINK debugging of the running M7 app; does not flash. |
 | `scripts/gdb_zephyr_hello_shell.sh` | Locate the Zephyr SDK GDB executable and forward its arguments. |
@@ -1280,6 +1387,7 @@ from the repository root unless their usage says otherwise; scripts that accept
 | `scripts/zephyr-ctf-scheduling.xml` | Trace Compass XML analysis for visualizing Zephyr task CPU scheduling from CTF traces. |
 | `scripts/zperf/benchmark.conf` | Kconfig additions for the zperf network benchmark build. |
 | `scripts/zperf/benchmark.overlay` | Devicetree overlay for the zperf benchmark build. |
+| `scripts/zyclictest/benchmark.conf` | Enable zyclictest, tickless 1 MHz timekeeping, and M7 caches for standalone latency measurements. |
 
 ## STM32CubeIDE reference build
 
