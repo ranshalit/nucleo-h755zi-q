@@ -80,6 +80,7 @@ import socket
 import sys
 
 with socket.socket() as sock:
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind(("127.0.0.1", 3333))
     except OSError as error:
@@ -175,6 +176,10 @@ for ((attempt = 0; attempt < 100; attempt++)); do
   if ! kill -0 "$OPENOCD_PID" 2>/dev/null; then
     cat "$LOG_DIR/openocd.log" >&2
     fail "OpenOCD exited before ready; snapshot attach failures may require explicit --reset"
+  fi
+  if grep -q '\[stm32h7x.cm7\] Examination failed' "$LOG_DIR/openocd.log"; then
+    cat "$LOG_DIR/openocd.log" >&2
+    fail "CM7 examination failed; retry with --reset and a new --output directory only if discarding the existing trace is acceptable; reset clears the recording"
   fi
   if grep -q 'Listening on port 3333 for gdb connections' "$LOG_DIR/openocd.log"; then
     READY=1

@@ -28,6 +28,8 @@ signal.signal(signal.SIGTERM, stop)
 if os.environ.get("FAIL_OPENOCD"):
     print("probe unavailable", flush=True)
     raise SystemExit(2)
+if os.environ.get("FAIL_EXAMINATION"):
+    print("Error: [stm32h7x.cm7] Examination failed", flush=True)
 print("Info : Listening on port 3333 for gdb connections", flush=True)
 while True:
     time.sleep(0.05)
@@ -108,6 +110,8 @@ if sys.argv[1:] == ["-"]:
     class TestSocket(socket.socket):
         def bind(self, address):
             if os.environ.get("TEST_PORT_BUSY"):
+                raise OSError("Address already in use")
+            if os.environ.get("TEST_PORT_TIME_WAIT") and not self.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR):
                 raise OSError("Address already in use")
             return super().bind((address[0], 0))
     socket.socket = TestSocket
@@ -236,6 +240,20 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("port 3333", result.stderr)
         self.assertFalse(self.log.exists())
+
+    def test_closed_connection_does_not_block_capture(self):
+        result = self.run_capture(extra_env={"TEST_PORT_TIME_WAIT": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Capture saved:", result.stdout)
+
+    def test_examination_failure_reports_reset_without_connecting(self):
+        result = self.run_capture(extra_env={"FAIL_EXAMINATION": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Examination failed", result.stderr)
+        self.assertIn("--reset", result.stderr)
+        self.assertNotIn("target extended-remote", self.calls())
+        self.assertNotIn("monitor reset", self.calls())
+        self.assertIn("openocd stopped", self.calls())
 
     def test_missing_debugger_does_not_reset_board(self):
         result = self.run_capture("--reset", extra_env={
