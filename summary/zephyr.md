@@ -7,7 +7,9 @@ Supported Zephyr targets:
 - `nucleo_h755zi_q/stm32h755xx/m7`
 - `nucleo_h755zi_q/stm32h755xx/m4`
 
-The verified build below was done for the Cortex-M7 target with Zephyr `v4.2.2`.
+The verified host build below targets Cortex-M7 with Zephyr `v4.4.0`. The
+upgrade image was flashed on 2026-10-25. Runtime validation was skipped by
+request, so console output and `zyclictest` measurements remain unverified.
 
 ## Workspace layout
 
@@ -28,15 +30,24 @@ The current external-app build output can be generated in:
 
 ## Host prerequisites used
 
-The working host setup in this environment was:
+Zephyr v4.4.0 requires Python 3.12 or newer. Use an isolated environment for
+the Zephyr Python tools:
 
-- `python3`
+```bash
+python3.12 -m venv "$HOME/.venvs/zephyr-4.4"
+source "$HOME/.venvs/zephyr-4.4/bin/activate"
+python -m pip install --disable-pip-version-check west ninja pyelftools
+cd vendor/zephyrproject/zephyr
+python -m pip install --disable-pip-version-check -r scripts/requirements.txt
+```
+
+Other host prerequisites:
+
 - `cmake`
 - `dtc`
 - `flex`
 - `bison`
 - `gperf`
-- Python packages: `west`, `ninja`, `pyelftools`
 
 The verified working ARM toolchain was the Zephyr SDK `arm-zephyr-eabi` toolchain extracted at:
 
@@ -50,17 +61,9 @@ The previously available Xilinx/PetaLinux `arm-none-eabi` toolchain could compil
 export PATH="$HOME/.local/bin:$PATH"
 mkdir -p vendor
 cd vendor
-west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.2.2 zephyrproject
+west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 zephyrproject
 cd zephyrproject
 west update
-```
-
-## Install host-side Python tools
-
-```bash
-python3 -m pip install --user --disable-pip-version-check west ninja pyelftools
-cd vendor/zephyrproject/zephyr
-python3 -m pip install --user --disable-pip-version-check -r scripts/requirements.txt
 ```
 
 ## Install the Zephyr SDK ARM toolchain
@@ -156,10 +159,12 @@ An additional hardware reset was also performed successfully with `STM32_Program
 
 ## Serial console verification
 
-With the Zephyr SDK-built image on the board, `/dev/ttyACM0` at `115200 8N1` showed:
+The v4.4.0 image was flashed without runtime validation; the output below is
+expected, not a hardware capture of this release. With the Zephyr SDK-built image running,
+`/dev/ttyACM0` at `115200 8N1` should show:
 
 ```text
-*** Booting Zephyr OS build v4.2.2 ***
+*** Booting Zephyr OS build v4.4.0 ***
 Hello World! nucleo_h755zi_q/stm32h755xx/m7
 
 uart:~$
@@ -179,7 +184,7 @@ uart:~$ help
 Available commands:
 ...
 uart:~$ kernel version
-Zephyr version 4.2.2
+Zephyr version 4.4.0
 uart:~$ leds on green
 green -> on
 uart:~$ leds off all
@@ -191,8 +196,24 @@ red -> off
 During debugging, a temporary UART probe app that printed once per second also
 worked correctly on the same `USART3` / ST-LINK VCP path.
 
+## M7 cyclic latency test
+
+The app enables Zephyr's `zyclictest` shell module only for the M7 board
+configuration. Start and stop a test from the UART shell with:
+
+```text
+uart:~$ zyclictest start -i 400 -p -11
+uart:~$ zyclictest stop
+```
+
+The M7 configuration enables tickless mode and sets
+`CONFIG_SYS_CLOCK_TICKS_PER_SEC=1000000`. Tickless mode suppresses periodic
+ticks; the configured rate still controls kernel timekeeping resolution. The
+M7 build and resolved Kconfig are verified and the image was flashed, but
+runtime command and latency measurements have not been confirmed.
+
 ## Notes
 
 - The board documentation in Zephyr recommends building per-core target, not just `nucleo_h755zi_q`.
-- The verified flow in this repo now covers fetching, building, flashing, and observing console output plus serial shell interaction on the M7 target.
+- The pre-upgrade hardware log was captured with Zephyr v4.2.2; the v4.4.0 image was flashed without runtime validation.
 - The most important practical lesson from this session is to use the official Zephyr SDK ARM toolchain for this board.

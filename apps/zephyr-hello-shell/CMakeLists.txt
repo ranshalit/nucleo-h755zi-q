@@ -70,7 +70,7 @@ if(CONFIG_APP_SPEECH_AI)
   include(cmake/speech_model.cmake)
   target_sources(app PRIVATE src/speech/speech_audio.c src/speech/speech_decision.c)
 endif()
-if(extra_conf_file)
+if(BOARD STREQUAL "nucleo_h755zi_q/stm32h755xx/m7")
   include(cmake/patch_stm32_hcd.cmake)
 endif()
 

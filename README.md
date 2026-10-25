@@ -32,11 +32,14 @@ git submodule update --init --recursive
 Install the host-side tools used by the verified Zephyr flow:
 
 ```bash
-python3 -m pip install --user --disable-pip-version-check west ninja pyelftools
+python3.12 -m venv "$HOME/.venvs/zephyr-4.4"
+source "$HOME/.venvs/zephyr-4.4/bin/activate"
+python -m pip install --disable-pip-version-check west ninja pyelftools
 cd vendor/zephyrproject/zephyr
-python3 -m pip install --user --disable-pip-version-check -r scripts/requirements.txt
+python -m pip install --disable-pip-version-check -r scripts/requirements.txt
 ```
 
+Zephyr v4.4.0 requires Python 3.12 or newer.
 Install the Zephyr SDK ARM toolchain and use it instead of unrelated local
 `arm-none-eabi` toolchains when validating on hardware.
 
@@ -82,6 +85,19 @@ CPU runtime statistics are enabled for this app. On the UART shell, run
 M7 Zephyr core, not the separate M4 core. `kernel thread list` also shows
 each thread's cumulative execution cycles and CPU percentage since boot;
 its `stack size ... (% ...)` lines instead report peak stack use, not CPU.
+
+The M7-only `zyclictest` shell command is enabled with Zephyr v4.4.0. For
+example, start a 400-microsecond cyclic test at priority -11 and stop it with:
+
+```text
+uart:~$ zyclictest start -i 400 -p -11
+uart:~$ zyclictest stop
+```
+
+The M7 configuration is tickless with `CONFIG_SYS_CLOCK_TICKS_PER_SEC=1000000`;
+tickless mode suppresses periodic ticks but the configured tick rate still
+sets the kernel's timekeeping resolution. The command has been build-verified,
+but its runtime measurements have not yet been validated on hardware.
 
 For a one-command CTF capture, connect ST-LINK and run from the repository
 root (no separate OpenOCD or GDB terminal needed):
@@ -422,10 +438,13 @@ command above.
 
 ### Serial validation
 
-With the programmed image running, `/dev/ttyACM0` at `115200 8N1` should show:
+The v4.4.0 image was built and flashed on 2026-10-25; runtime validation was
+skipped by request. This is expected output, not a v4.4.0 hardware capture.
+With the programmed image running, `/dev/ttyACM0` at
+`115200 8N1` should show:
 
 ```text
-*** Booting Zephyr OS build v4.2.2 ***
+*** Booting Zephyr OS build v4.4.0 ***
 Hello World! nucleo_h755zi_q/stm32h755xx/m7
 Blink threads started for yellow (400 ms) and red (700 ms)
 HTTP server listening on http://192.168.55.2:80/
@@ -440,7 +459,7 @@ uart:~$ help
 Available commands:
 ...
 uart:~$ kernel version
-Zephyr version 4.2.2
+Zephyr version 4.4.0
 uart:~$ leds on green
 green -> on
 uart:~$ leds off all

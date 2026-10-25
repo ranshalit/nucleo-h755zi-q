@@ -115,9 +115,10 @@ static void prepare_close_response(struct http_client_ctx *client,
 }
 
 HTTP_SERVICE_DEFINE(board_http_service, NULL, &board_http_port,
-		    CONFIG_HTTP_SERVER_MAX_CLIENTS, CONFIG_HTTP_SERVER_MAX_CLIENTS, NULL, NULL);
+		    CONFIG_HTTP_SERVER_MAX_CLIENTS, CONFIG_HTTP_SERVER_MAX_CLIENTS, NULL, NULL, NULL);
 
-static int static_asset_handler(struct http_client_ctx *client, enum http_data_status status,
+static int static_asset_handler(struct http_client_ctx *client,
+				enum http_transaction_status status,
 				const struct http_request_ctx *request_ctx,
 				struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -126,7 +127,7 @@ static int static_asset_handler(struct http_client_ctx *client, enum http_data_s
 	ARG_UNUSED(client);
 	ARG_UNUSED(request_ctx);
 
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
@@ -531,7 +532,7 @@ static int send_bad_request(struct http_client_ctx *client, struct http_response
 	return 0;
 }
 
-static int status_handler(struct http_client_ctx *client, enum http_data_status status,
+static int status_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			  const struct http_request_ctx *request_ctx,
 			  struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -542,7 +543,7 @@ static int status_handler(struct http_client_ctx *client, enum http_data_status 
 	ARG_UNUSED(request_ctx);
 	ARG_UNUSED(user_data);
 
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
@@ -567,7 +568,7 @@ static struct http_resource_detail_dynamic status_resource_detail = {
 	.user_data = NULL,
 };
 
-static int io_handler(struct http_client_ctx *client, enum http_data_status status,
+static int io_handler(struct http_client_ctx *client, enum http_transaction_status status,
 		      const struct http_request_ctx *request_ctx,
 		      struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -578,7 +579,7 @@ static int io_handler(struct http_client_ctx *client, enum http_data_status stat
 	ARG_UNUSED(request_ctx);
 	ARG_UNUSED(user_data);
 
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
@@ -602,7 +603,7 @@ static struct http_resource_detail_dynamic io_resource_detail = {
 	.user_data = NULL,
 };
 
-static int mouse_handler(struct http_client_ctx *client, enum http_data_status status,
+static int mouse_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			 const struct http_request_ctx *request_ctx,
 			 struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -613,7 +614,7 @@ static int mouse_handler(struct http_client_ctx *client, enum http_data_status s
 	ARG_UNUSED(request_ctx);
 	ARG_UNUSED(user_data);
 
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
@@ -640,7 +641,7 @@ static struct http_resource_detail_dynamic mouse_resource_detail = {
 	.user_data = NULL,
 };
 
-static int mic_handler(struct http_client_ctx *client, enum http_data_status status,
+static int mic_handler(struct http_client_ctx *client, enum http_transaction_status status,
 		       const struct http_request_ctx *request_ctx,
 		       struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -652,7 +653,7 @@ static int mic_handler(struct http_client_ctx *client, enum http_data_status sta
 
 	ARG_UNUSED(request_ctx);
 	ARG_UNUSED(user_data);
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
@@ -710,7 +711,7 @@ static struct http_resource_detail_dynamic mic_resource_detail = {
 	.cb = mic_handler,
 };
 
-static int speech_handler(struct http_client_ctx *client, enum http_data_status status,
+static int speech_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			  const struct http_request_ctx *request_ctx,
 			  struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -718,7 +719,7 @@ static int speech_handler(struct http_client_ctx *client, enum http_data_status 
 	static struct speech_snapshot snapshot;
 	ARG_UNUSED(request_ctx);
 	ARG_UNUSED(user_data);
-	if (status != HTTP_SERVER_DATA_FINAL) { return 0; }
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) { return 0; }
 	speech_snapshot_get(&snapshot);
 	int ret = speech_snapshot_json(&snapshot, response, sizeof(response));
 	if (ret < 0) {
@@ -739,7 +740,8 @@ static struct http_resource_detail_dynamic speech_resource_detail = {
 	.cb = speech_handler,
 };
 
-static int speech_settings_handler(struct http_client_ctx *client, enum http_data_status status,
+static int speech_settings_handler(struct http_client_ctx *client,
+				   enum http_transaction_status status,
 				   const struct http_request_ctx *request_ctx,
 				   struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -751,7 +753,8 @@ static int speech_settings_handler(struct http_client_ctx *client, enum http_dat
 
 	ARG_UNUSED(user_data);
 
-	if (status == HTTP_SERVER_DATA_ABORTED) {
+	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
+	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
 		cursor = 0U;
 		return 0;
 	}
@@ -768,7 +771,7 @@ static int speech_settings_handler(struct http_client_ctx *client, enum http_dat
 		cursor += request_ctx->data_len;
 	}
 
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
@@ -848,7 +851,8 @@ static struct http_resource_detail_dynamic speech_settings_resource_detail = {
 	.cb = speech_settings_handler,
 };
 
-static int dashboard_handler(struct http_client_ctx *client, enum http_data_status status,
+static int dashboard_handler(struct http_client_ctx *client,
+			     enum http_transaction_status status,
 			     const struct http_request_ctx *request_ctx,
 			     struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -859,7 +863,7 @@ static int dashboard_handler(struct http_client_ctx *client, enum http_data_stat
 	ARG_UNUSED(request_ctx);
 	ARG_UNUSED(user_data);
 
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
@@ -909,7 +913,7 @@ static int apply_led_action_to_selection(const char *selection, const char *acti
 	return board_led_apply_action(led_id, action, NULL);
 }
 
-static int leds_handler(struct http_client_ctx *client, enum http_data_status status,
+static int leds_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			const struct http_request_ctx *request_ctx,
 			struct http_response_ctx *response_ctx, void *user_data)
 {
@@ -923,7 +927,8 @@ static int leds_handler(struct http_client_ctx *client, enum http_data_status st
 	ARG_UNUSED(client);
 	ARG_UNUSED(user_data);
 
-	if (status == HTTP_SERVER_DATA_ABORTED) {
+	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
+	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
 		cursor = 0U;
 		return 0;
 	}
@@ -937,7 +942,7 @@ static int leds_handler(struct http_client_ctx *client, enum http_data_status st
 	memcpy(post_buffer + cursor, request_ctx->data, request_ctx->data_len);
 	cursor += request_ctx->data_len;
 
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
