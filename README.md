@@ -194,15 +194,75 @@ cp vendor/zephyrproject/zephyr/subsys/tracing/ctf/tsdl/metadata \
 babeltrace2 build/zephyr-hello-shell/trace
 ```
 
-At runtime, the application starts two Zephyr threads: one toggles the yellow
-LED (LD2) and the other toggles the red LED (LD3). The green LED (LD1) remains
-available through the serial shell commands. The same application now also runs
+At runtime, dedicated Zephyr threads toggle the yellow LED (LD2) and red LED
+(LD3), alongside the streaming, speech, USB, and system workers described below.
+The green LED (LD1) remains available through the serial shell commands.
+The same application also runs
 a plain HTTP server on the board Ethernet interface and exposes built-in board
 I/O through both JSON API endpoints and a browser dashboard:
 
 - LEDs `LD1`, `LD2`, `LD3`
 - user button `B1`
 - board and network status
+
+### Runtime threads
+
+Run `kernel thread list` on the UART shell to inspect threads. The M7 hardware
+build with speech AI and the USB event worker enabled showed these 16 threads;
+optional features, diagnostic commands, and simulation builds can change the list.
+
+#### Application threads
+
+| Thread | Priority in snapshot | Purpose |
+| --- | --- | --- |
+| `audio_stream` | 7 | Streams USB microphone PCM audio over HTTP on port 8082 to one client. Waits for socket activity with a short poll timeout. |
+| `camera_stream` | 7 | Serves an MJPEG loop of prerecorded JPEG frames on port 8081, not live camera capture. Sleeps 125 ms between frames (about 8 fps). |
+| `speech_ai` | 11 | Converts 48 kHz stereo microphone audio to 16 kHz mono, extracts features, runs English keyword recognition, and filters predictions into recognized events. Priority 11 lets the USB event worker preempt inference; polling builds use speech priority 8. |
+| `stm32_usbh` | 10 | Runs the ST USB host state machine for enumeration, transfers, mouse reports, and microphone capture. The default event-worker mode waits for notifications; diagnostic polling mode uses the same thread. |
+| `board_io_error` | 8 | Waits for LED error messages and prints failures from privileged context, keeping logging outside the small userspace LED threads. A pending state does not indicate an error. |
+| `red_led_blink` | 7 | Toggles red LED LD3, then sleeps for its configured interval. Runs in userspace with restricted memory and device access. |
+| `yellow_led_blink` | 7 | Toggles yellow LED LD2 with independent timing and a separate memory domain. Shares the red thread's entry function, with different arguments. |
+
+#### Zephyr infrastructure threads
+
+| Thread | Priority in snapshot | Purpose |
+| --- | --- | --- |
+| `http_server_tid` | -1 | Serves the port-80 dashboard, static web assets, and APIs for board I/O, USB devices, and speech results/settings. Separate from the audio/video streaming threads. |
+| `stm_eth` | -14 | STM32 Ethernet driver worker for deferred receive processing and forwarding received frames toward the network stack. |
+| `tx_q[0]` | -1 | Processes queued outgoing packets for network traffic class 0 toward the Ethernet driver. |
+| `rx_q[0]` | -1 | Processes incoming packets for network traffic class 0 through the protocol stack. |
+| `net_mgmt` | -1 | Dispatches network-management events and callbacks, such as interface, link, and address changes; not normal packet-data processing. |
+| `tcp_work` | -14 | Dedicated TCP workqueue for deferred processing, retransmissions, delayed ACKs, connection timers, and cleanup. |
+| `shell_uart` | 9 | Runs UART shell commands and prints their output. The `*` marker identifies the thread executing the listing. |
+| `sysworkq` | -1 | Shared system workqueue for deferred work submitted by drivers, kernel components, and application code. |
+| `idle` | 15 | Runs when no other thread is ready and enables CPU idle/power-saving behavior. Its runtime is idle time, not useful application work. |
+
+The `main` thread is absent after startup returns: the created workers keep
+running. Workqueue threads such as `net_mgmt`, `tcp_work`, and `sysworkq` can
+share an entry address because they use the same generic workqueue function.
+
+#### Interpreting `kernel thread list`
+
+| Field | Meaning |
+| --- | --- |
+| Leading address / `entry` | Address of the thread object / its entry function. |
+| `priority` | Smaller number means higher priority: 7 outranks 11. Negative priorities are cooperative; ordinary threads cannot preempt them, so they must block or yield. Interrupts can still run. |
+| `state: pending` | Waiting for an object, event, or I/O; normally not consuming CPU while blocked. |
+| `state: sleeping` | Explicit timed sleep, such as the delay between LED toggles or video frames. |
+| `state: queued` | Ready/runnable, including the current thread. The listing is collected over time, not an atomic snapshot. A blank idle state alone does not indicate a fault. |
+| `Total execution cycles` / CPU percentage | Cumulative runtime accounting, not instantaneous utilization. Percentages round down, so 0% does not mean never executed. This Zephyr shell command prints cycle totals truncated to 32 bits, which can wrap, while calculating percentages from wider counters. |
+| `stack size`, `unused`, `usage` | Stack capacity and observed high-water usage, not current consumption. Unused space in this snapshot does not guarantee worst-case safety. |
+| `timeout` | Raw internal timeout-queue ticks, not milliseconds or directly comparable remaining delays. The large negative value is an internal sentinel, not an enormous sleep or an error; zero does not imply runnable. |
+| `options: 0x4` | `K_USER`: userspace thread, as used by the LED workers. |
+| `options: 0x1` | `K_ESSENTIAL`: aborting this thread is a fatal system error. |
+| `options: 0x0` | Neither of those flags is set. |
+| `Scheduler: ... since last call` | Timer ticks elapsed since the last clock announcement, not a context-switch count. |
+
+In the supplied 2026-10-25 snapshot, speech AI accounted for 54% of runtime,
+USB host 4%, and idle 35%. These are cumulative observations, not fresh interval
+measurements or guaranteed workload costs. Use `cpu usage 5000` for a five-second
+busy/idle measurement. The highest shown stack percentage was `sysworkq` at
+688/1024 bytes (67%), leaving 336 bytes untouched; no shown stack was exhausted.
 
 ### Run with Zephyr native_sim
 
@@ -1124,6 +1184,17 @@ instructions. TensorFlow Lite Micro is the interpreter that walks the model
 graph and calls the CMSIS-NN kernel for each layer instead of plain C loops,
 giving roughly 2-4x speedup over plain C on the same core. The int8 model maps
 directly onto these integer SIMD instructions; the FPU is barely used.
+
+**CMSIS-NN is a software library, not a separate hardware accelerator.** It is
+compiled into the firmware and executes on the same Cortex-M7 CPU:
+
+```text
+TensorFlow Lite Micro -> CMSIS-NN functions -> Cortex-M7 DSP/SIMD instructions
+```
+
+Its execution therefore counts toward `speech_ai` CPU usage. A separate NPU
+would execute neural-network operations outside the CPU; the STM32H755 has no
+NPU, and this application does not use its separate M4 core for inference.
 
 Per inference (every 100 ms, called a "frame" by the acceptance settings):
 
