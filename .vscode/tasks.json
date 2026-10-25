@@ -13,7 +13,9 @@
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {
-                    "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+                    "PATH": "${env:HOME}/.venvs/zephyr-4.4/bin:${env:HOME}/.local/bin:${env:PATH}",
+                    "VIRTUAL_ENV": "${env:HOME}/.venvs/zephyr-4.4",
+                    "WEST_BIN": "${env:HOME}/.venvs/zephyr-4.4/bin/west"
                 }
             },
             "group": {
@@ -35,7 +37,9 @@
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {
-                    "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+                    "PATH": "${env:HOME}/.venvs/zephyr-4.4/bin:${env:HOME}/.local/bin:${env:PATH}",
+                    "VIRTUAL_ENV": "${env:HOME}/.venvs/zephyr-4.4",
+                    "WEST_BIN": "${env:HOME}/.venvs/zephyr-4.4/bin/west"
                 }
             },
             "problemMatcher": []
