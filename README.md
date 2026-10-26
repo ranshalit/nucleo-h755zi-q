@@ -21,7 +21,7 @@ The ST-LINK VCP serial console is exposed on `/dev/ttyACM0` or a stable
 
 ## Installation
 
-Clone the repository and initialize the vendored Zephyr workspace submodules:
+Clone the repository and initialize the pinned Zephyr and TFLite Micro submodules:
 
 ```bash
 git clone <repo-url>
@@ -35,9 +35,21 @@ Install the host-side tools used by the verified Zephyr flow:
 python3.12 -m venv "$HOME/.venvs/zephyr-4.4"
 source "$HOME/.venvs/zephyr-4.4/bin/activate"
 python -m pip install --disable-pip-version-check west ninja pyelftools
-cd vendor/zephyrproject/zephyr
-python -m pip install --disable-pip-version-check -r scripts/requirements.txt
+python -m pip install --disable-pip-version-check -r vendor/zephyrproject/zephyr/scripts/requirements.txt
+
+# Run once in a fresh checkout to create the local west workspace.
+west init -l vendor/zephyrproject/zephyr
+cd vendor/zephyrproject
+west update
+cd ../..
 ```
+
+The Zephyr submodule pins v4.4.0; its `west.yml` pins the remaining modules.
+Those modules and west's local `.west/` state are not Git submodules of this
+repository. After updating this repository, run `git submodule update --init
+--recursive`, then run `west update` from `vendor/zephyrproject` to align modules
+with the pinned Zephyr manifest. Skip `west init` when that workspace already
+exists. Keep the Python virtual environment active for builds.
 
 Zephyr v4.4.0 requires Python 3.12 or newer.
 Install the Zephyr SDK ARM toolchain and use it instead of unrelated local
