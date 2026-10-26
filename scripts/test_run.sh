@@ -8,7 +8,7 @@ trap 'rm -rf -- "$WORK_DIR"' EXIT
 
 for s in flash_zephyr_hello_shell.sh run_zephyr_hello_shell_qemu.sh \
          run_zephyr_hello_shell_native.sh flash_zephyr_zperf.sh \
-         flash_zephyr_zyclictest.sh; do
+         flash_zephyr_zyclictest.sh flash_zephyr_sample.sh; do
   printf '#!/usr/bin/env bash\nprintf "%%s|%%s\\n" "%s" "$*"\n' "$s" > "${WORK_DIR}/$s"
 done
 export RUN_SCRIPTS_DIR="$WORK_DIR"
@@ -48,7 +48,10 @@ done
 
 expect_error "Usage:"
 expect_error "Usage:" hello
-expect_error "unknown app: foo" foo board
+expect_dispatch "flash_zephyr_sample.sh|blinky" blinky board
+expect_dispatch "flash_zephyr_sample.sh|basic/blinky --build-only" basic/blinky board --build-only
+expect_dispatch "flash_zephyr_sample.sh|--list can" list-samples can
+expect_error "samples are only supported on board" blinky qemu
 expect_error "unknown target: bar" hello bar
 expect_error "iperf is not supported on qemu (supported: board)" iperf qemu
 expect_error "cyclictest is not supported on native_sim (supported: board)" cyclictest native
