@@ -276,6 +276,25 @@ measurements or guaranteed workload costs. Use `cpu usage 5000` for a five-secon
 busy/idle measurement. The highest shown stack percentage was `sysworkq` at
 688/1024 bytes (67%), leaving 336 bytes untouched; no shown stack was exhausted.
 
+### Running applications
+
+`scripts/run.sh <app> <target> [args...]` dispatches to the per-app script and
+passes extra args through. `scripts/run.sh list` shows the matrix.
+
+| app \ target | board | qemu | native_sim |
+|---|---|---|---|
+| `hello` (dashboard) | `flash_zephyr_hello_shell.sh` | `run_zephyr_hello_shell_qemu.sh` | `run_zephyr_hello_shell_native.sh` |
+| `iperf` (`zperf`) | `flash_zephyr_zperf.sh` | — | — |
+| `cyclictest` (`zyclictest`) | `flash_zephyr_zyclictest.sh` | — | — |
+
+```bash
+scripts/run.sh hello board
+scripts/run.sh hello qemu --network tap
+scripts/run.sh hello native --profile tap
+scripts/run.sh iperf board --restore
+scripts/run.sh cyclictest board --help
+```
+
 ### Run with Zephyr native_sim
 
 The same application can run on Zephyr's `native_sim/native/64` host target.
