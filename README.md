@@ -826,8 +826,11 @@ scripts/flash_zephyr_zperf.sh --help
 The script uses the Zephyr SDK ARM toolchain and a separate build directory,
 `build/zephyr-bandwidth`. Before flashing, it saves the dashboard build's HEX
 once to `build/zperf-dashboard-backup/zephyr/zephyr.hex`. Ensure
-`build/zephyr-hello-shell/zephyr/zephyr.hex` matches the dashboard firmware you
-want to restore. An existing backup is retained, not refreshed automatically.
+`/tmp/stm32h7-zephyr-hello-shell/zephyr/zephyr.hex` matches the dashboard firmware you
+want to restore. The dashboard build directory defaults to the hello runner's
+`ZEPHYR_BUILD_DIR` (or `/tmp/stm32h7-zephyr-hello-shell`); override it with
+`ZPERF_DASHBOARD_BUILD_DIR` if using a different dashboard build.
+An existing backup is retained, not refreshed automatically.
 The script builds/flashes only; run the measurements separately as below.
 
 Connect the host and board by Ethernet. The benchmark configuration uses board
@@ -923,7 +926,9 @@ scripts/flash_zephyr_zyclictest.sh --help
 The helper uses the Zephyr SDK, a separate `build/zephyr-zyclictest/` directory,
 and saves the dashboard HEX once to
 `build/zyclictest-dashboard-backup/zephyr/zephyr.hex`. Ensure
-`build/zephyr-hello-shell/zephyr/zephyr.hex` matches the firmware you want restored.
+`/tmp/stm32h7-zephyr-hello-shell/zephyr/zephyr.hex` matches the firmware you want restored.
+The dashboard directory defaults to the hello runner's `ZEPHYR_BUILD_DIR`
+(or `/tmp/stm32h7-zephyr-hello-shell`).
 Override these paths with `ZYCLICTEST_BUILD_DIR`, `ZYCLICTEST_DASHBOARD_BUILD_DIR`,
 and `ZYCLICTEST_BACKUP_DIR`; use a new backup directory to preserve a newer
 dashboard build. Linked worktrees also need `ZEPHYR_BASE` pointing to the shared
@@ -1438,6 +1443,8 @@ from the repository root unless their usage says otherwise; scripts that accept
 
 | Script | Purpose |
 | --- | --- |
+| `scripts/run.sh` | Single entry point: `scripts/run.sh <app> <target> [args...]` runs hello, iperf, or cyclictest on board, qemu, or native_sim via the scripts below; `scripts/run.sh list` shows the matrix. |
+| `scripts/test_run.sh` | Test `run.sh` dispatch, aliases, argument passthrough, and error handling using stub scripts. |
 | `scripts/flash_zephyr_hello_shell.sh` | Build, flash, and validate the Zephyr hello-shell app on the NUCLEO-H755ZI-Q. |
 | `scripts/run_zephyr_hello_shell_native.sh` | Build and run the app with Zephyr `native_sim`, using localhost or TAP networking. |
 | `scripts/run_zephyr_hello_shell_qemu.sh` | Build and run the app on QEMU's MPS2 AN500 Cortex-M7 machine. |

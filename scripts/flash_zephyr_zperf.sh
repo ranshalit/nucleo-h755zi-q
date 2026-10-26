@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 ZEPHYR_BASE="${ZEPHYR_BASE:-${REPO_ROOT}/vendor/zephyrproject/zephyr}"
 BUILD_DIR="${ZPERF_BUILD_DIR:-${REPO_ROOT}/build/zephyr-bandwidth}"
-DASHBOARD_BUILD_DIR="${ZPERF_DASHBOARD_BUILD_DIR:-${REPO_ROOT}/build/zephyr-hello-shell}"
+DASHBOARD_BUILD_DIR="${ZPERF_DASHBOARD_BUILD_DIR:-${ZEPHYR_BUILD_DIR:-/tmp/stm32h7-zephyr-hello-shell}}"
 BACKUP_DIR="${ZPERF_BACKUP_DIR:-${REPO_ROOT}/build/zperf-dashboard-backup}"
 WEST_BIN="${WEST_BIN:-west}"
 ACTION="${1:---build-flash}"
@@ -19,6 +19,8 @@ Usage: bash scripts/flash_zephyr_zperf.sh [--build-only|--flash-only|--restore]
 Default: build and flash upstream Zephyr zperf, replacing the dashboard temporarily.
 Before flashing, save the dashboard build's HEX once; --restore flashes that copy.
 The dashboard build must match the currently running firmware.
+Dashboard build: ZPERF_DASHBOARD_BUILD_DIR, then ZEPHYR_BUILD_DIR,
+otherwise /tmp/stm32h7-zephyr-hello-shell (same default as the hello runner).
 No UART/application validation or automatic benchmark is performed.
 
 Board: 192.168.55.2/24. Host: 192.168.55.101/24. Use iperf v2 (not iperf3).
@@ -68,6 +70,17 @@ if [[ "${ACTION}" != "--flash-only" ]]; then
     done
   fi
   [[ -x "${SDK}/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc" ]] || die "Zephyr SDK ARM toolchain not found; set ZEPHYR_SDK_ROOT"
+  # Module upgrades can replace parsed Kconfig files with directories.
+  kconfig_sources="${BUILD_DIR}/zephyr/kconfig/sources.txt"
+  if [[ -f "${kconfig_sources}" ]]; then
+    while IFS= read -r source || [[ -n "${source}" ]]; do
+      if [[ ! -f "${source}" ]]; then
+        printf 'Discarding stale Kconfig source list: %s\n' "${source}"
+        rm -- "${kconfig_sources}"
+        break
+      fi
+    done < "${kconfig_sources}"
+  fi
   (
     cd "${ZEPHYR_BASE}"
     ZEPHYR_TOOLCHAIN_VARIANT=cross-compile \
@@ -82,7 +95,7 @@ fi
 if [[ "${ACTION}" != "--build-only" ]]; then
   [[ -s "${BUILD_DIR}/zephyr/zephyr.hex" ]] || die "benchmark HEX missing; build first"
   if [[ ! -e "${BACKUP_DIR}/zephyr/zephyr.hex" ]]; then
-    [[ -s "${DASHBOARD_BUILD_DIR}/zephyr/zephyr.hex" ]] || die "dashboard HEX missing; cannot preserve firmware"
+    [[ -s "${DASHBOARD_BUILD_DIR}/zephyr/zephyr.hex" ]] || die "dashboard HEX missing; cannot preserve firmware: ${DASHBOARD_BUILD_DIR}/zephyr/zephyr.hex (set ZPERF_DASHBOARD_BUILD_DIR to the dashboard build)"
     mkdir -p "${BACKUP_DIR}/zephyr"
     cp -- "${DASHBOARD_BUILD_DIR}/zephyr/zephyr.hex" "${BACKUP_DIR}/zephyr/zephyr.hex"
   fi

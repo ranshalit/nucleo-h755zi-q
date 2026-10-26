@@ -92,6 +92,22 @@ if run; then fail "ignored build failure"; fi
 [[ ! -e "${PROGRAMMER_ARGS}" ]]
 unset FAKE_BUILD_FAIL
 
+export ZEPHYR_BUILD_DIR="${WORK_DIR}/shared-dashboard"
+mkdir -p "${ZEPHYR_BUILD_DIR}/zephyr"
+printf 'shared dashboard\n' > "${ZEPHYR_BUILD_DIR}/zephyr/zephyr.hex"
+export ZYCLICTEST_BACKUP_DIR="${WORK_DIR}/explicit-backup"
+run --flash-only
+cmp "${ZYCLICTEST_DASHBOARD_BUILD_DIR}/zephyr/zephyr.hex" "${ZYCLICTEST_BACKUP_DIR}/zephyr/zephyr.hex"
+unset ZYCLICTEST_DASHBOARD_BUILD_DIR
+export ZYCLICTEST_BACKUP_DIR="${WORK_DIR}/shared-backup"
+run --flash-only || {
+  cat "${WORK_DIR}/err" >&2
+  fail "shared ZEPHYR_BUILD_DIR not used for dashboard backup"
+}
+cmp "${ZEPHYR_BUILD_DIR}/zephyr/zephyr.hex" "${ZYCLICTEST_BACKUP_DIR}/zephyr/zephyr.hex"
+unset ZEPHYR_BUILD_DIR
+rm -f "${WEST_ARGS}" "${PROGRAMMER_ARGS}"
+
 export ZYCLICTEST_BACKUP_DIR="${WORK_DIR}/missing-backup"
 export ZYCLICTEST_DASHBOARD_BUILD_DIR="${WORK_DIR}/missing-dashboard"
 check_failure 'dashboard HEX missing' --flash-only
