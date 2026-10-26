@@ -81,6 +81,7 @@ esac
 [[ -f "$ZEPHYR_DIR/CMakeLists.txt" ]] ||
   die "Zephyr workspace not found: $ZEPHYR_DIR"
 [[ -f "$APP_DIR/CMakeLists.txt" ]] || die "application not found: $APP_DIR"
+ZEPHYR_DIR="$(cd -- "$ZEPHYR_DIR" && pwd -P)"
 
 if [[ "$BUILD_DIR" != /* ]]; then
   BUILD_DIR="$PWD/$BUILD_DIR"
@@ -91,6 +92,15 @@ if [[ "$ACTION" != run-only ]]; then
     die "west not found: $WEST_BIN (install west or set WEST_BIN)"
   [[ -x "$SDK_ROOT/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc" ]] ||
     die "Zephyr SDK compiler not found under $SDK_ROOT; set ZEPHYR_SDK_ROOT"
+
+  if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+    cached_zephyr_base="$(sed -n 's/^ZEPHYR_BASE:PATH=//p' "$BUILD_DIR/CMakeCache.txt")"
+    if [[ -n "$cached_zephyr_base" && "$cached_zephyr_base" != "$ZEPHYR_DIR" ]]; then
+      printf 'Cleaning build cache from previous Zephyr tree: %s\n' "$cached_zephyr_base"
+      cmake "-DBINARY_DIR=$(cd -- "$BUILD_DIR" && pwd -P)" \
+        "-DSOURCE_DIR=$APP_DIR" -P "$ZEPHYR_DIR/cmake/pristine.cmake"
+    fi
+  fi
 
   printf '==> Building MPS2 AN500 firmware\n'
   (

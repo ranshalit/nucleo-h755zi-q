@@ -10,6 +10,10 @@ trap 'rm -r -- "$TMP_DIR"' EXIT
 cat > "$TMP_DIR/west" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$WEST_ARGS"
+if [[ -f "$TEST_BUILD_CACHE" ]]; then
+  echo "stale CMake cache reached west build" >&2
+  exit 1
+fi
 if [[ "${FAKE_WEST_FAIL:-0}" != 0 ]]; then
   exit "$FAKE_WEST_FAIL"
 fi
@@ -28,8 +32,18 @@ done
 exit 9
 EOF
 chmod +x "$TMP_DIR/west"
+cat > "$TMP_DIR/cmake" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CMAKE_ARGS"
+[[ "$*" == *"-P $TEST_ZEPHYR_BASE/cmake/pristine.cmake"* ]]
+rm -f "$TEST_BUILD_CACHE"
+EOF
+chmod +x "$TMP_DIR/cmake"
 export WEST_ARGS="$TMP_DIR/args"
 export WEST_TEST_DIR="$TMP_DIR"
+export TEST_BUILD_CACHE="$TMP_DIR/stale-build/CMakeCache.txt"
+export TEST_ZEPHYR_BASE="$REPO_ROOT/vendor/zephyrproject/zephyr"
+export CMAKE_ARGS="$TMP_DIR/cmake-args"
 
 cd "$TMP_DIR"
 
@@ -40,6 +54,13 @@ grep -Fqx -- "-b" "$WEST_ARGS"
 grep -Fqx -- "native_sim/native/64" "$WEST_ARGS"
 grep -Fqx -- "$REPO_ROOT/build/zephyr-hello-shell-native-localhost" "$WEST_ARGS"
 grep -Fq 'http://127.0.0.1:8080/' "$TMP_DIR/out"
+
+mkdir -p "$(dirname "$TEST_BUILD_CACHE")"
+printf 'ZEPHYR_BASE:PATH=%s\n' "$TMP_DIR/removed-zephyr" > "$TEST_BUILD_CACHE"
+PATH="$TMP_DIR:$PATH" WEST_BIN="$TMP_DIR/west" bash "$RUNNER" --build-only \
+  --build-dir "$TMP_DIR/stale-build" > "$TMP_DIR/out"
+grep -Fq -- "$TEST_ZEPHYR_BASE/cmake/pristine.cmake" "$CMAKE_ARGS"
+test ! -e "$TEST_BUILD_CACHE"
 
 WEST_BIN="$TMP_DIR/west" bash "$RUNNER" --profile tap --build-only --build-dir tap-build > "$TMP_DIR/out"
 grep -Fqx -- "$TMP_DIR/tap-build" "$WEST_ARGS"

@@ -99,6 +99,14 @@ fi
 if (( BUILD )); then
   command -v "${WEST_BIN:-west}" >/dev/null 2>&1 ||
     die "west not found: ${WEST_BIN:-west} (install west or set WEST_BIN)"
+  if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+    cached_zephyr_base="$(sed -n 's/^ZEPHYR_BASE:PATH=//p' "$BUILD_DIR/CMakeCache.txt")"
+    if [[ -n "$cached_zephyr_base" && "$cached_zephyr_base" != "$ZEPHYR_DIR" ]]; then
+      printf 'Cleaning build cache from previous Zephyr tree: %s\n' "$cached_zephyr_base"
+      cmake "-DBINARY_DIR=$(cd -- "$BUILD_DIR" && pwd -P)" \
+        "-DSOURCE_DIR=$APP_DIR" -P "$ZEPHYR_DIR/cmake/pristine.cmake"
+    fi
+  fi
   if (
     cd "$ZEPHYR_DIR"
     ZEPHYR_TOOLCHAIN_VARIANT=host "${WEST_BIN:-west}" build -p always \
