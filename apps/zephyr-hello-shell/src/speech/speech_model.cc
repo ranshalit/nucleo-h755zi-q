@@ -5,6 +5,7 @@
 #include <new>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
+#include <zephyr/linker/section_tags.h>
 #include "tensorflow/lite/micro/kernels/conv.h"
 #include "tensorflow/lite/micro/kernels/depthwise_conv.h"
 #include "tensorflow/lite/micro/kernels/fully_connected.h"
@@ -18,6 +19,12 @@
 #define SPEECH_MODEL_DATA __attribute__((section(".speech_model_bank2"), used))
 #else
 #define SPEECH_MODEL_DATA
+#endif
+
+#if DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(zephyr_dtcm))
+#define SPEECH_ARENA_DATA __dtcm_bss_section
+#else
+#define SPEECH_ARENA_DATA
 #endif
 
 namespace {
@@ -56,8 +63,8 @@ public:
 	}
 };
 OpProfiler op_profiler;
-alignas(16) uint8_t frontend_arena[frontend_arena_size];
-alignas(16) uint8_t classifier_arena[classifier_arena_size];
+alignas(16) SPEECH_ARENA_DATA uint8_t frontend_arena[frontend_arena_size];
+alignas(16) SPEECH_ARENA_DATA uint8_t classifier_arena[classifier_arena_size];
 tflite::MicroMutableOpResolver<18> frontend_ops;
 tflite::MicroMutableOpResolver<6> classifier_ops;
 alignas(tflite::MicroInterpreter) uint8_t frontend_storage[sizeof(tflite::MicroInterpreter)];

@@ -41,3 +41,8 @@
 &sram3 {
 	zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM_NOCACHE)>;
 };
+
+/* CPU-only speech arenas use DTCM; no peripheral DMA buffers belong here. */
+&dtcm {
+	zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM)>;
+};
