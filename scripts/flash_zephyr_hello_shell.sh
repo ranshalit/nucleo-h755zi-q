@@ -221,6 +221,17 @@ build_app() {
     fi
   fi
   log "building ${APP_DIR} for ${BOARD}"
+  if [[ -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
+    local cached_zephyr_base
+    cached_zephyr_base="$(sed -n 's/^ZEPHYR_BASE:PATH=//p' "${BUILD_DIR}/CMakeCache.txt")"
+    if [[ -n "${cached_zephyr_base}" && "${cached_zephyr_base}" != "${ZEPHYR_BASE}" ]]; then
+      # West's pristine step uses the cached tree, which may no longer exist.
+      log "cleaning build cache from previous Zephyr tree: ${cached_zephyr_base}"
+      cmake "-DBINARY_DIR=$(cd -- "${BUILD_DIR}" && pwd -P)" \
+        "-DSOURCE_DIR=$(cd -- "${APP_DIR}" && pwd -P)" \
+        -P "${ZEPHYR_BASE}/cmake/pristine.cmake"
+    fi
+  fi
   (
     cd "${ZEPHYR_BASE}"
     "${WEST_BIN}" build -p always -b "${BOARD}" "${APP_DIR}" -d "${BUILD_DIR}" -- "${toolchain_args[@]}"

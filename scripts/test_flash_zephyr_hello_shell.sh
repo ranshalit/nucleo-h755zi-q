@@ -13,6 +13,12 @@ trap 'rm -rf -- "$WORK_DIR"' EXIT
 cat > "$WORK_DIR/bin/west" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >> "$WEST_ARGS"
+if [[ "${1:-}" == build && -f "$TEST_BUILD_DIR/CMakeCache.txt" ]]; then
+  if ! grep -Fqx -- "ZEPHYR_BASE:PATH=$TEST_ZEPHYR_BASE" "$TEST_BUILD_DIR/CMakeCache.txt"; then
+    echo "stale CMake cache reached west build" >&2
+    exit 1
+  fi
+fi
 exit 0
 EOF
 chmod +x "$WORK_DIR/bin/west"
@@ -111,3 +117,58 @@ grep -Fqx -- '--conn-modifiers' "$WEST_ARGS"
 grep -Fqx -- 'mode=UR' "$WEST_ARGS"
 
 printf 'flash BCM4 guard tests passed\n'
+
+export TEST_BUILD_DIR="$WORK_DIR/build"
+export TEST_ZEPHYR_BASE="$WORK_DIR/zephyr-base"
+BUILD_ARGS=(
+  --build-only
+  --zephyr-base "$WORK_DIR/zephyr-base"
+  --app-dir "$WORK_DIR/app"
+  --build-dir "$TEST_BUILD_DIR"
+)
+
+mkdir -p "$WORK_DIR/zephyr-base/cmake"
+cat > "$WORK_DIR/zephyr-base/cmake/pristine.cmake" <<'EOF'
+if(NOT IS_ABSOLUTE "${BINARY_DIR}" OR NOT IS_ABSOLUTE "${SOURCE_DIR}")
+  message(FATAL_ERROR "Expected absolute build and source paths")
+endif()
+file(REMOVE "${BINARY_DIR}/CMakeCache.txt" "${BINARY_DIR}/stale-build-artifact")
+EOF
+
+cat > "$TEST_BUILD_DIR/CMakeCache.txt" <<EOF
+ZEPHYR_BASE:PATH=$WORK_DIR/removed-worktree/zephyr
+APPLICATION_SOURCE_DIR:PATH=$WORK_DIR/app
+EOF
+touch "$TEST_BUILD_DIR/stale-build-artifact"
+rm -f "$WEST_ARGS"
+if ! env WEST_BIN="$WORK_DIR/bin/west" ZEPHYR_TOOLCHAIN_VARIANT=host \
+  bash "$RUNNER" "${BUILD_ARGS[@]}" >"$WORK_DIR/out" 2>"$WORK_DIR/err"; then
+  cat "$WORK_DIR/out" "$WORK_DIR/err" >&2
+  exit 1
+fi
+test ! -e "$TEST_BUILD_DIR/stale-build-artifact"
+grep -Fqx -- 'build' "$WEST_ARGS"
+
+rm -f "$WEST_ARGS"
+env WEST_BIN="$WORK_DIR/bin/west" ZEPHYR_TOOLCHAIN_VARIANT=host \
+  bash "$RUNNER" "${BUILD_ARGS[@]}" >"$WORK_DIR/out" 2>"$WORK_DIR/err"
+grep -Fqx -- 'build' "$WEST_ARGS"
+
+cat > "$WORK_DIR/zephyr-base/cmake/pristine.cmake" <<'EOF'
+message(FATAL_ERROR "pristine failed")
+EOF
+cat > "$TEST_BUILD_DIR/CMakeCache.txt" <<EOF
+ZEPHYR_BASE:PATH=$TEST_ZEPHYR_BASE
+EOF
+env WEST_BIN="$WORK_DIR/bin/west" ZEPHYR_TOOLCHAIN_VARIANT=host \
+  bash "$RUNNER" "${BUILD_ARGS[@]}" >"$WORK_DIR/out" 2>"$WORK_DIR/err"
+
+cat > "$TEST_BUILD_DIR/CMakeCache.txt" <<EOF
+ZEPHYR_BASE:PATH=$WORK_DIR/removed-worktree/zephyr
+EOF
+rm -f "$WEST_ARGS"
+check_failure 'pristine failed' env WEST_BIN="$WORK_DIR/bin/west" \
+  ZEPHYR_TOOLCHAIN_VARIANT=host bash "$RUNNER" "${BUILD_ARGS[@]}"
+test ! -e "$WEST_ARGS"
+
+printf 'stale build cache recovery tests passed\n'
