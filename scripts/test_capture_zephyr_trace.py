@@ -30,7 +30,12 @@ if os.environ.get("FAIL_OPENOCD"):
     raise SystemExit(2)
 if os.environ.get("FAIL_EXAMINATION"):
     print("Error: [stm32h7x.cm7] Examination failed", flush=True)
+elif not os.environ.get("DELAY_EXAMINATION_FAILURE"):
+    print("Info : [stm32h7x.cm7] Examination succeed", flush=True)
 print("Info : Listening on port 3333 for gdb connections", flush=True)
+if os.environ.get("DELAY_EXAMINATION_FAILURE"):
+    time.sleep(0.3)
+    print("Error: [stm32h7x.cm7] Examination failed", flush=True)
 while True:
     time.sleep(0.05)
 """
@@ -53,6 +58,7 @@ commands = Path(sys.argv[sys.argv.index("-x") + 1]).read_text()
 pos = int(os.environ.get("TEST_POS", "128"))
 skip = False
 reset = False
+sleep_debug_enabled = False
 for command in commands.splitlines():
     if command.startswith("set $trace_reset = "):
         reset = command.endswith("1")
@@ -69,7 +75,14 @@ for command in commands.splitlines():
         continue
     log(command)
     if command.startswith("shell sleep"):
+        sleep_debug_enabled = False
         log("sleep " + str(float(command.split()[-1])))
+    if command == "monitor stm32h7x_dbgmcu_mmw 0x004 0x00600003 0":
+        sleep_debug_enabled = True
+    if (command == "monitor halt" and os.environ.get("TEST_IDLE_SLEEP")
+            and not sleep_debug_enabled):
+        print("timed out while waiting for target halted", file=sys.stderr)
+        raise SystemExit(1)
     if command == "quit 1":
         print("error: invalid trace position", file=sys.stderr)
         raise SystemExit(1)
@@ -181,6 +194,16 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("sleep 20.0", self.calls())
 
+    def test_idle_sleep_debug_enabled_before_halt(self):
+        for name, args in (("snapshot", []), ("reset", ["--reset", "--seconds", "20"])):
+            with self.subTest(mode=name):
+                result = self.run_capture(
+                    "--output", str(self.root / name), *args,
+                    extra_env={"TEST_IDLE_SLEEP": "1"},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((self.root / name / "channel0_0").stat().st_size, 128)
+
     def test_invalid_arguments_before_probe(self):
         for args in [
             ["--seconds"], ["--elf"], ["--output"], ["--bogus"],
@@ -261,6 +284,49 @@ else:
         })
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("openocd ", self.calls())
+
+    def test_listener_without_examined_target_does_not_start_gdb(self):
+        result = self.run_capture(extra_env={"DELAY_EXAMINATION_FAILURE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("CM7 examination failed", result.stderr)
+        self.assertNotIn("target extended-remote", self.calls())
+        self.assertIn("openocd stopped", self.calls())
+
+    @unittest.skipUnless(shutil.which("tclsh"), "tclsh not installed")
+    def test_openocd_snapshot_hook_does_not_soft_reset(self):
+        harness = r"""
+rename source original_source
+proc find {path} {return $path}
+proc source {path} {
+    if {$path eq "target/stm32h7x.cfg"} {
+        proc first_gdb_attach_hook {} {puts vendor-reset}
+    }
+}
+proc reset_config {args} {puts "reset_config $args"}
+proc init {} {}
+proc targets {args} {}
+proc stm32h7x_dbgmcu_mmw {args} {puts "debug $args"}
+proc halt {} {puts halt}
+set CONNECT_UNDER_RESET $env(TEST_RESET)
+original_source $env(TEST_CONFIG)
+first_gdb_attach_hook
+"""
+        for reset in ("0", "1"):
+            with self.subTest(reset=reset):
+                result = subprocess.run(
+                    ["tclsh"], input=harness, capture_output=True, text=True,
+                    env={**self.env, "TEST_RESET": reset,
+                         "TEST_CONFIG": str(SCRIPT.with_name("stm32h755zi_cm7.openocd.cfg"))},
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                if reset == "0":
+                    self.assertEqual(result.stdout.splitlines(),
+                                     ["debug 0x004 0x00600003 0", "halt"])
+                else:
+                    self.assertIn("connect_assert_srst", result.stdout)
+                    self.assertIn("vendor-reset", result.stdout)
 
     @unittest.skipUnless(shutil.which("babeltrace2"), "babeltrace2 not installed")
     def test_capture_directory_decodes_with_babeltrace(self):

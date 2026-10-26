@@ -150,6 +150,9 @@ monitor reset halt
 monitor resume
 shell sleep $SECONDS_ARG
 end
+# Zephyr clears sleep-debug bits at boot; re-enable after the wait via AP2.
+# DBGMCU_CR: D3DBGCKEN | D1DBGCKEN | DBG_STOPD1 | DBG_SLEEPD1.
+monitor stm32h7x_dbgmcu_mmw 0x004 0x00600003 0
 monitor halt
 set \$trace_pos = 'tracing_backend_ram.c'::pos
 if \$trace_pos <= 0 || \$trace_pos > sizeof(ram_tracing)
@@ -167,6 +170,7 @@ if [[ "$RESET" == 1 ]]; then
   printf 'Reset requested: clears existing recording; waiting %s seconds after boot.\n' "$SECONDS_ARG"
   OPENOCD_ARGS+=(--connect-under-reset)
 fi
+: > "$LOG_DIR/openocd.log"
 "$SCRIPT_DIR/debug_zephyr_hello_shell.sh" "${OPENOCD_ARGS[@]}" \
   > "$LOG_DIR/openocd.log" 2>&1 &
 OPENOCD_PID=$!
@@ -177,11 +181,13 @@ for ((attempt = 0; attempt < 100; attempt++)); do
     cat "$LOG_DIR/openocd.log" >&2
     fail "OpenOCD exited before ready; snapshot attach failures may require explicit --reset"
   fi
-  if grep -q '\[stm32h7x.cm7\] Examination failed' "$LOG_DIR/openocd.log"; then
+  OPENOCD_LOG="$(cat "$LOG_DIR/openocd.log")"
+  if grep -q '\[stm32h7x.cm7\] Examination failed' <<< "$OPENOCD_LOG"; then
     cat "$LOG_DIR/openocd.log" >&2
     fail "CM7 examination failed; retry with --reset and a new --output directory only if discarding the existing trace is acceptable; reset clears the recording"
   fi
-  if grep -q 'Listening on port 3333 for gdb connections' "$LOG_DIR/openocd.log"; then
+  if grep -q '\[stm32h7x.cm7\] Examination succeed' <<< "$OPENOCD_LOG" &&
+    grep -q 'Listening on port 3333 for gdb connections' <<< "$OPENOCD_LOG"; then
     READY=1
     break
   fi
@@ -189,7 +195,7 @@ for ((attempt = 0; attempt < 100; attempt++)); do
 done
 if [[ "$READY" != 1 ]]; then
   cat "$LOG_DIR/openocd.log" >&2
-  fail "timed out waiting for OpenOCD GDB port 3333"
+  fail "timed out waiting for CM7 examination and OpenOCD GDB port 3333"
 fi
 
 GDB_STARTED=1
