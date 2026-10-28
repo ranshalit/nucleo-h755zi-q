@@ -7,6 +7,7 @@
 
 #include <zephyr/irq.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #include <stm32h7xx_hal.h>
 #include <stm32h7xx_hal_hcd.h>
@@ -29,6 +30,8 @@
 
 #define STM32_HCD_IRQ 101 /* OTG_FS_IRQn, RM0468 Table 135 */
 #define STM32_HCD_IRQ_PRI 5
+
+LOG_MODULE_REGISTER(usb_hcd, LOG_LEVEL_DBG);
 
 static HCD_HandleTypeDef hcd_handle;
 static bool hcd_poll_mode;
@@ -179,15 +182,15 @@ static void adapter_config_gpio(void)
 
 static int adapter_init_hardware(void)
 {
-	printf("usbhost: init start\n");
+	LOG_DBG("init start");
 	adapter_config_gpio();
-	printf("usbhost: gpio configured\n");
-	printf("usbhost: PD10 VBUS_EN ODR=%lu IDR=%lu, PA9 VBUS sense=%lu\n",
+	LOG_DBG("gpio configured");
+	LOG_DBG("PD10 VBUS_EN ODR=%lu IDR=%lu, PA9 VBUS sense=%lu",
 	       (unsigned long)LL_GPIO_IsOutputPinSet(GPIOD, LL_GPIO_PIN_10),
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOD, LL_GPIO_PIN_10),
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9));
 	k_msleep(20);
-	printf("usbhost: VBUS settled PD10=%lu PA9=%lu\n",
+	LOG_DBG("VBUS settled PD10=%lu PA9=%lu",
 	       (unsigned long)LL_GPIO_IsOutputPinSet(GPIOD, LL_GPIO_PIN_10),
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9));
 
@@ -196,7 +199,7 @@ static int adapter_init_hardware(void)
 		/* Match usb_dc_stm32/udc_stm32: USB2 embedded FS needs this in sleep. */
 		LL_AHB1_GRP1_DisableClockSleep(LL_AHB1_GRP1_PERIPH_USB2OTGHSULPI);
 	}
-	printf("usbhost: AHB1LPENR=0x%08lx USB2_ULPI_sleep=%lu\n",
+	LOG_DBG("AHB1LPENR=0x%08lx USB2_ULPI_sleep=%lu",
 	       (unsigned long)RCC->AHB1LPENR,
 	       (unsigned long)((RCC->AHB1LPENR & RCC_AHB1LPENR_USB2OTGHSULPILPEN) != 0U));
 
@@ -208,13 +211,13 @@ static int adapter_init_hardware(void)
 	LL_RCC_HSI48_Enable();
 	for (int i = 0; !LL_RCC_HSI48_IsReady(); i++) {
 		if (i > 1000) {
-			printf("usbhost: HSI48 clock never became ready\n");
+			LOG_ERR("HSI48 clock never became ready");
 			return -ENODEV;
 		}
 		k_busy_wait(100);
 	}
 	LL_RCC_SetUSBClockSource(LL_RCC_USB_CLKSOURCE_HSI48);
-	printf("usbhost: HSI48 clock ready\n");
+	LOG_DBG("HSI48 clock ready");
 
 	/*
 	 * STM32H7 requires the internal USB 3.3V supply/analog domain to be
@@ -225,12 +228,12 @@ static int adapter_init_hardware(void)
 	HAL_PWREx_EnableUSBVoltageDetector();
 	for (int i = 0; !__HAL_PWR_GET_FLAG(PWR_FLAG_USB33RDY); i++) {
 		if (i > 1000) {
-			printf("usbhost: USB33RDY never set; power domain not ready\n");
+			LOG_ERR("USB33RDY never set; power domain not ready");
 			return -ENODEV;
 		}
 		k_busy_wait(100);
 	}
-	printf("usbhost: USB33RDY ready\n");
+	LOG_DBG("USB33RDY ready");
 
 	memset(&hcd_handle, 0, sizeof(hcd_handle));
 	hcd_handle.Instance = USB_OTG_FS;
@@ -267,19 +270,19 @@ static int adapter_init_hardware(void)
 	 * records the physical ID state while separately checking whether the
 	 * software force-host bit latches and whether CMOD follows it.
 	 */
-	printf("usbhost: GOTGCTL=0x%08lx (CIDSTS=%lu, PA10_IDR=%lu, %s)\n",
+	LOG_DBG("GOTGCTL=0x%08lx (CIDSTS=%lu, PA10_IDR=%lu, %s)",
 	       (unsigned long)hcd_handle.Instance->GOTGCTL,
 	       (unsigned long)((hcd_handle.Instance->GOTGCTL & USB_OTG_GOTGCTL_CIDSTS) != 0),
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_10),
 	       (hcd_handle.Instance->GOTGCTL & USB_OTG_GOTGCTL_CIDSTS) ?
 		       "B-device/ID-high/NOT-grounded" : "A-device/ID-low/grounded");
 
-	printf("usbhost: before CoreInit GUSBCFG=0x%08lx GCCFG=0x%08lx GRSTCTL=0x%08lx\n",
+	LOG_DBG("before CoreInit GUSBCFG=0x%08lx GCCFG=0x%08lx GRSTCTL=0x%08lx",
 	       (unsigned long)hcd_handle.Instance->GUSBCFG,
 	       (unsigned long)hcd_handle.Instance->GCCFG,
 	       (unsigned long)hcd_handle.Instance->GRSTCTL);
 	hal_ret = USB_CoreInit(hcd_handle.Instance, hcd_handle.Init);
-	printf("usbhost: USB_CoreInit -> %d (GUSBCFG=0x%08lx GCCFG=0x%08lx GRSTCTL=0x%08lx)\n",
+	LOG_DBG("USB_CoreInit -> %d (GUSBCFG=0x%08lx GCCFG=0x%08lx GRSTCTL=0x%08lx)",
 	       hal_ret,
 	       (unsigned long)hcd_handle.Instance->GUSBCFG,
 	       (unsigned long)hcd_handle.Instance->GCCFG,
@@ -290,8 +293,8 @@ static int adapter_init_hardware(void)
 	}
 
 	hal_ret = USB_SetCurrentMode(hcd_handle.Instance, USB_HOST_MODE);
-	printf("usbhost: USB_SetCurrentMode -> %d (GUSBCFG=0x%08lx FHMOD=%lu FDMOD=%lu "
-	       "GINTSTS=0x%08lx CMOD=%lu)\n",
+	LOG_DBG("USB_SetCurrentMode -> %d (GUSBCFG=0x%08lx FHMOD=%lu FDMOD=%lu "
+	       "GINTSTS=0x%08lx CMOD=%lu)",
 	       hal_ret,
 	       (unsigned long)hcd_handle.Instance->GUSBCFG,
 	       (unsigned long)((hcd_handle.Instance->GUSBCFG &
@@ -307,7 +310,7 @@ static int adapter_init_hardware(void)
 	}
 
 	hal_ret = USB_HostInit(hcd_handle.Instance, hcd_handle.Init);
-	printf("usbhost: USB_HostInit -> %d\n", hal_ret);
+	LOG_DBG("USB_HostInit -> %d", hal_ret);
 	if (hal_ret != HAL_OK) {
 		hcd_handle.State = HAL_HCD_STATE_ERROR;
 		return -EIO;
@@ -323,8 +326,8 @@ static int adapter_init_hardware(void)
 	 * (malformed/truncated transfers, no HAL error) that would match our
 	 * SETUP-stage STALL symptom.
 	 */
-	printf("usbhost: GAHBCFG=0x%08lx GRXFSIZ=0x%08lx HNPTXFSIZ=0x%08lx "
-	       "HPTXFSIZ=0x%08lx HCFG=0x%08lx\n",
+	LOG_DBG("GAHBCFG=0x%08lx GRXFSIZ=0x%08lx HNPTXFSIZ=0x%08lx "
+	       "HPTXFSIZ=0x%08lx HCFG=0x%08lx",
 	       (unsigned long)hcd_handle.Instance->GAHBCFG,
 	       (unsigned long)hcd_handle.Instance->GRXFSIZ,
 	       (unsigned long)hcd_handle.Instance->DIEPTXF0_HNPTXFSIZ,
@@ -339,7 +342,7 @@ static int adapter_init_hardware(void)
 
 	uint32_t hprt = *(__IO uint32_t *)((uintptr_t)hcd_handle.Instance +
 					  USB_OTG_HOST_PORT_BASE);
-	printf("usbhost: hardware ready HPRT=0x%08lx GINTSTS=0x%08lx GINTMSK=0x%08lx\n",
+	LOG_DBG("hardware ready HPRT=0x%08lx GINTSTS=0x%08lx GINTMSK=0x%08lx",
 	       (unsigned long)hprt,
 	       (unsigned long)hcd_handle.Instance->GINTSTS,
 	       (unsigned long)hcd_handle.Instance->GINTMSK);
@@ -392,7 +395,7 @@ USBH_StatusTypeDef USBH_LL_Start(USBH_HandleTypeDef *phost)
 	 * HAL_HCD_Start() for a fair, same-lifecycle-stage comparison against
 	 * the Device-mode GAHBCFG dump taken right after usb_enable() there.
 	 */
-	printf("usbhost: after HAL_HCD_Start GAHBCFG=0x%08lx GUSBCFG=0x%08lx\n",
+	LOG_DBG("after HAL_HCD_Start GAHBCFG=0x%08lx GUSBCFG=0x%08lx",
 	       (unsigned long)hcd->Instance->GAHBCFG,
 	       (unsigned long)hcd->Instance->GUSBCFG);
 
@@ -448,8 +451,8 @@ USBH_StatusTypeDef USBH_LL_OpenPipe(USBH_HandleTypeDef *phost, uint8_t pipe,
 		USB_OTG_HostTypeDef *hreg =
 			(USB_OTG_HostTypeDef *)((uint32_t)hcd->Instance + USB_OTG_HOST_BASE);
 
-		printf("USBH_LL_OpenPipe: pipe=%u epnum=0x%02x ep_type=%u ret=%d "
-		       "HAINTMSK=0x%08lx GINTMSK=0x%08lx\n",
+		LOG_DBG("USBH_LL_OpenPipe: pipe=%u epnum=0x%02x ep_type=%u ret=%d "
+		       "HAINTMSK=0x%08lx GINTMSK=0x%08lx",
 		       pipe, epnum, ep_type, (int)ret,
 		       (unsigned long)hreg->HAINTMSK,
 		       (unsigned long)hcd->Instance->GINTMSK);
@@ -507,9 +510,9 @@ static void adapter_dump_channel(uint8_t pipe, HCD_URBStateTypeDef state)
 	uint32_t USBx_BASE = (uint32_t)hcd_handle.Instance;
 	USB_OTG_HostChannelTypeDef *hc = USBx_HC(pipe);
 
-	printf("ST USBH: pipe %u URB=%d HC_state=%d HCINT=0x%08lx "
+	LOG_WRN("pipe %u URB=%d HC_state=%d HCINT=0x%08lx "
 	       "HCINTMSK=0x%08lx HCTSIZ=0x%08lx HCCHAR=0x%08lx "
-	       "HPRT=0x%08lx PA9=%lu PG7_nFAULT=%lu\n",
+	       "HPRT=0x%08lx PA9=%lu PG7_nFAULT=%lu",
 	       pipe, state, HAL_HCD_HC_GetState(&hcd_handle, pipe),
 	       (unsigned long)hc->HCINT, (unsigned long)hc->HCINTMSK,
 	       (unsigned long)hc->HCTSIZ, (unsigned long)hc->HCCHAR,
@@ -591,7 +594,7 @@ USBH_StatusTypeDef USBH_LL_DriverVBUS(USBH_HandleTypeDef *phost,
 		LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_10);
 	}
 
-	printf("usbhost: VBUS %s PD10=%lu PA9=%lu HPRT=0x%08lx\n",
+	LOG_INF("VBUS %s PD10=%lu PA9=%lu HPRT=0x%08lx",
 	       state != 0U ? "on" : "off",
 	       (unsigned long)LL_GPIO_IsOutputPinSet(GPIOD, LL_GPIO_PIN_10),
 	       (unsigned long)LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_9),

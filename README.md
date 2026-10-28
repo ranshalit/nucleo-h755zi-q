@@ -82,7 +82,7 @@ The devicetree overlay contains these app-specific hardware settings:
 | --- | --- |
 | PD10 USB VBUS control | Drive PD10 high at startup to disable the active-low USB power switch until the app controls it. |
 | ADC3 and die-temperature sensor | Enable the internal temperature sensor and configure the ADC clock source and prescaler. |
-| Speech-model flash region | Declare 128 KiB at `0x08120000` in flash bank 2 for model data; M4 boot is disabled separately in the board-specific `.conf`. |
+| Speech-model flash region | Declare 128 KiB at `0x08140000` in flash bank 2 for model data; M4 boot is disabled separately in the board-specific `.conf`. |
 | SRAM3 memory attributes | Mark Ethernet DMA descriptor/buffer memory non-cacheable so CPU accesses bypass D-cache while other memory can remain cacheable. |
 
 After a VS Code build, inspect the merged devicetree in
@@ -1084,6 +1084,27 @@ evidence. Original polling is available through `usb-poll-baseline.conf`;
 `usbhost pollmode on` is a separate, intentionally polling diagnostic.
 See the [A/B experiment report](docs/experiments/usb-event-worker/README.md)
 for hardware results, clock fix, limitations, and sanitized raw logs.
+
+Normal startup shows only the `uart:~$` prompt; warnings and errors remain
+visible. USB enumeration, stream announcements, and speech readiness use
+INFO logs; USB register/pipe traces and mouse reports use DEBUG logs.
+Enable future diagnostics without rebuilding:
+
+```text
+log status
+log enable inf app stm32_usbh usb_audio usb_mouse speech
+log enable dbg usb_hcd
+```
+
+Replug the USB device to capture enumeration logs. `log enable wrn` restores
+quiet operation for all modules; reset also restores that default. Explicit
+commands such as `usbhost status` and `version` always print their results.
+Logs suppressed before enabling diagnostics are not retained.
+
+The M7 application partition is 1280 KiB so runtime logging fits without
+changing speed optimizations. Embedded speech models and dashboard script
+occupy the next 128 KiB sector at `0x08140000`; flash the complete `zephyr.hex`
+to update code and data together.
 
 The board has no dedicated temperature sensor, so the dashboard's "MCU die
 temp" card shows the STM32H755 internal die sensor (ADC3 channel 18,

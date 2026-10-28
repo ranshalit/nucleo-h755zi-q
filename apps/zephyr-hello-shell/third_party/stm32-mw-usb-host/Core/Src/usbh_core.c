@@ -545,7 +545,7 @@ USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost)
           if (phost->device.RstCnt > 3U)
           {
             /* Buggy Device can't complete reset */
-            USBH_UsrLog("USB Reset Failed, Please unplug the Device.");
+            USBH_ErrLog("USB Reset Failed, Please unplug the Device.");
             phost->gState = HOST_ABORT_STATE;
           }
           else
@@ -699,7 +699,7 @@ USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost)
 
       if (phost->ClassNumber == 0U)
       {
-        USBH_UsrLog("No Class has been registered.");
+        USBH_ErrLog("No Class has been registered.");
       }
       else
       {
@@ -728,13 +728,13 @@ USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost)
           else
           {
             phost->gState = HOST_ABORT_STATE;
-            USBH_UsrLog("Device not supporting %s class.", phost->pActiveClass->Name);
+            USBH_ErrLog("Device not supporting %s class.", phost->pActiveClass->Name);
           }
         }
         else
         {
           phost->gState = HOST_ABORT_STATE;
-          USBH_UsrLog("No registered class for this device.");
+          USBH_ErrLog("No registered class for this device.");
         }
       }
 
@@ -865,7 +865,7 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         if (phost->device.EnumCnt > 3U)
         {
           /* Buggy Device can't complete get device desc request */
-          USBH_UsrLog("Control error, Device not Responding Please unplug the Device.");
+          USBH_ErrLog("Control error, Device not Responding Please unplug the Device.");
           phost->gState = HOST_ABORT_STATE;
         }
         else
@@ -901,7 +901,7 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         if (phost->device.EnumCnt > 3U)
         {
           /* Buggy Device can't complete get device desc request */
-          USBH_UsrLog("Control error, Device not Responding Please unplug the Device.");
+          USBH_ErrLog("Control error, Device not Responding Please unplug the Device.");
           phost->gState = HOST_ABORT_STATE;
         }
         else
@@ -948,7 +948,7 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         USBH_ErrLog("Control error: Device Set Address request failed");
 
         /* Buggy Device can't complete get device desc request */
-        USBH_UsrLog("Control error, Device not Responding Please unplug the Device.");
+        USBH_ErrLog("Control error, Device not Responding Please unplug the Device.");
         phost->gState = HOST_ABORT_STATE;
         phost->EnumState = ENUM_IDLE;
       }
@@ -972,7 +972,7 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         if (phost->device.EnumCnt > 3U)
         {
           /* Buggy Device can't complete get device desc request */
-          USBH_UsrLog("Control error, Device not Responding Please unplug the Device.");
+          USBH_ErrLog("Control error, Device not Responding Please unplug the Device.");
           phost->gState = HOST_ABORT_STATE;
         }
         else
@@ -1006,7 +1006,7 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         if (phost->device.EnumCnt > 3U)
         {
           /* Buggy Device can't complete get device desc request */
-          USBH_UsrLog("Control error, Device not Responding Please unplug the Device.");
+          USBH_ErrLog("Control error, Device not Responding Please unplug the Device.");
           phost->gState = HOST_ABORT_STATE;
         }
         else
@@ -1373,4 +1373,3 @@ USBH_StatusTypeDef USBH_LL_NotifyURBChange(USBH_HandleTypeDef *phost)
 /**
   * @}
   */
-

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <stm32h7xx_hal.h>
+#include <zephyr/logging/log.h>
 
 #define USBH_MAX_NUM_ENDPOINTS       8U
 #define USBH_MAX_NUM_INTERFACES      8U
@@ -15,7 +16,7 @@
 #define USBH_MAX_NUM_SUPPORTED_CLASS 2U
 #define USBH_MAX_SIZE_CONFIGURATION  0x400U
 #define USBH_MAX_DATA_BUFFER         0x400U
-#define USBH_DEBUG_LEVEL             2U
+#define USBH_DEBUG_LEVEL             3U
 #define USBH_USE_OS                  0U
 #define USBH_IN_NAK_PROCESS          0U
 
@@ -27,9 +28,8 @@
 #if USBH_DEBUG_LEVEL > 0U
 #define USBH_UsrLog(...) \
 	do { \
-		printf("ST USBH: "); \
-		printf(__VA_ARGS__); \
-		printf("\n"); \
+		LOG_MODULE_DECLARE(stm32_usbh, LOG_LEVEL_DBG); \
+		LOG_INF(__VA_ARGS__); \
 	} while (0)
 #else
 #define USBH_UsrLog(...) do { } while (0)
@@ -38,9 +38,8 @@
 #if USBH_DEBUG_LEVEL > 1U
 #define USBH_ErrLog(...) \
 	do { \
-		printf("ST USBH ERROR: "); \
-		printf(__VA_ARGS__); \
-		printf("\n"); \
+		LOG_MODULE_DECLARE(stm32_usbh, LOG_LEVEL_DBG); \
+		LOG_ERR(__VA_ARGS__); \
 	} while (0)
 #else
 #define USBH_ErrLog(...) do { } while (0)
@@ -49,9 +48,8 @@
 #if USBH_DEBUG_LEVEL > 2U
 #define USBH_DbgLog(...) \
 	do { \
-		printf("ST USBH DEBUG: "); \
-		printf(__VA_ARGS__); \
-		printf("\n"); \
+		LOG_MODULE_DECLARE(stm32_usbh, LOG_LEVEL_DBG); \
+		LOG_DBG(__VA_ARGS__); \
 	} while (0)
 #else
 #define USBH_DbgLog(...) do { } while (0)

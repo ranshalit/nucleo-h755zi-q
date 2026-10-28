@@ -66,8 +66,10 @@ static void board_early_uart_puts(const char *str)
 
 static void board_emit_boot_banner(void)
 {
-	board_early_uart_puts("*** Booting Zephyr OS build ***\n");
-	board_early_uart_puts("*** Booting Zephyr OS build ***\n");
+	if (IS_ENABLED(CONFIG_BOOT_BANNER)) {
+		board_early_uart_puts("*** Booting Zephyr OS build ***\n");
+		board_early_uart_puts("*** Booting Zephyr OS build ***\n");
+	}
 	LL_USART_Disable(USART3);
 }
 

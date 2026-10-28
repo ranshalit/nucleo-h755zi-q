@@ -15,10 +15,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #include "usbh_core.h"
 #include "usbh_ctlreq.h"
 #include "usbh_pipes.h"
+
+LOG_MODULE_REGISTER(usb_audio, LOG_LEVEL_DBG);
 
 #define AUDIO_CLASS 0x01U
 #define AUDIO_REQ_SET_CUR 0x01U
@@ -167,7 +170,7 @@ static USBH_StatusTypeDef audio_init(USBH_HandleTypeDef *host)
 	if (usb_function_select(raw, sizeof(host->device.CfgDesc_Raw), &sel) != 0 ||
 	    sel.kind != USB_FUNCTION_AUDIO_IN ||
 	    sel.audio.packet_bytes > AUDIO_MAX_PACKET) {
-		printf("ST USBH: no supported audio input function\n");
+		LOG_WRN("no supported audio input function");
 		return USBH_FAIL;
 	}
 	audio.format = sel.audio;
@@ -183,7 +186,7 @@ static USBH_StatusTypeDef audio_init(USBH_HandleTypeDef *host)
 					audio.format.bits_per_sample);
 	k_spin_unlock(&audio_lock, key);
 	if (session == 0U) {
-		printf("ST USBH: audio format not supported by capture ring\n");
+		LOG_ERR("audio format not supported by capture ring");
 		return USBH_FAIL;
 	}
 
@@ -197,8 +200,8 @@ static USBH_StatusTypeDef audio_init(USBH_HandleTypeDef *host)
 			     audio.format.packet_bytes) != USBH_OK) {
 		return audio_init_failed(host, "iso pipe open failed");
 	}
-	printf("ST USBH: audio IN IF%u alt%u EP 0x%02x %u Hz %u ch %u-bit "
-	       "packet %u B rate_control=%u session %u\n",
+	LOG_INF("audio IN IF%u alt%u EP 0x%02x %u Hz %u ch %u-bit "
+	       "packet %u B rate_control=%u session %u",
 	       audio.format.interface_number, audio.format.alternate_setting,
 	       audio.format.endpoint, audio.format.sample_rate_hz,
 	       audio.format.channels, audio.format.bits_per_sample,
@@ -251,7 +254,7 @@ static USBH_StatusTypeDef audio_requests(USBH_HandleTypeDef *host)
 			audio.request = audio.rate_control ? AUDIO_REQ_STEP_SET_RATE :
 							     AUDIO_REQ_STEP_DONE;
 		} else if (result != USBH_BUSY) {
-			printf("ST USBH: audio SET_INTERFACE failed: %u\n", result);
+			LOG_ERR("audio SET_INTERFACE failed: %u", result);
 			audio_set_ready(false, "set interface failed");
 			return USBH_FAIL;
 		}
@@ -270,7 +273,7 @@ static USBH_StatusTypeDef audio_requests(USBH_HandleTypeDef *host)
 		if (result == USBH_OK) {
 			audio.request = AUDIO_REQ_STEP_GET_RATE;
 		} else if (result != USBH_BUSY) {
-			printf("ST USBH: audio SET_CUR sampling rate failed: %u\n", result);
+			LOG_ERR("audio SET_CUR sampling rate failed: %u", result);
 			audio_set_ready(false, "set sample rate failed");
 			return USBH_FAIL;
 		}
@@ -284,7 +287,7 @@ static USBH_StatusTypeDef audio_requests(USBH_HandleTypeDef *host)
 		result = USBH_CtlReq(host, audio.rate, 3U);
 		if (result == USBH_OK) {
 			rate = audio.rate[0] | (audio.rate[1] << 8) | (audio.rate[2] << 16);
-			printf("ST USBH: audio sampling rate readback %u Hz\n", rate);
+			LOG_INF("audio sampling rate readback %u Hz", rate);
 			if (rate != audio.format.sample_rate_hz) {
 				audio_set_ready(false, "sample rate mismatch");
 				return USBH_FAIL;
@@ -292,10 +295,10 @@ static USBH_StatusTypeDef audio_requests(USBH_HandleTypeDef *host)
 			audio.request = AUDIO_REQ_STEP_DONE;
 		} else if (result == USBH_NOT_SUPPORTED) {
 			/* GET_CUR is optional; SET_CUR was accepted. */
-			printf("ST USBH: audio GET_CUR sampling rate not supported\n");
+			LOG_INF("audio GET_CUR sampling rate not supported");
 			audio.request = AUDIO_REQ_STEP_DONE;
 		} else if (result != USBH_BUSY) {
-			printf("ST USBH: audio GET_CUR sampling rate failed: %u\n", result);
+			LOG_ERR("audio GET_CUR sampling rate failed: %u", result);
 			audio_set_ready(false, "get sample rate failed");
 			return USBH_FAIL;
 		}
@@ -304,14 +307,14 @@ static USBH_StatusTypeDef audio_requests(USBH_HandleTypeDef *host)
 	case AUDIO_REQ_STEP_DONE:
 	default:
 		audio_set_ready(true, "streaming");
-		printf("ST USBH: audio capture ready on EP 0x%02x\n", audio.format.endpoint);
+		LOG_INF("audio capture ready on EP 0x%02x", audio.format.endpoint);
 		return USBH_OK;
 	}
 }
 
 static void audio_fail(USBH_HandleTypeDef *host, const char *reason)
 {
-	printf("ST USBH: audio capture stopped: %s\n", reason);
+	LOG_ERR("audio capture stopped: %s", reason);
 	audio_set_ready(false, reason);
 	(void)USBH_ClosePipe(host, audio.pipe);
 }

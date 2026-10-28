@@ -631,10 +631,10 @@ def attempt_validation(attempt: int) -> bool:
                     if proc.stdout.strip():
                         print(proc.stdout.strip())
 
-            ser, chunk = read_until_resilient(ser, 8.0, patterns=("Hello World!", "uart:~$"))
+            ser, chunk = read_until_resilient(ser, 8.0, patterns=("uart:~$",))
             transcript += chunk
 
-            if "Hello World!" in transcript and "uart:~$" in transcript:
+            if "uart:~$" in transcript:
                 break
 
         transcript += read_until_quiet(ser)
@@ -645,6 +645,7 @@ def attempt_validation(attempt: int) -> bool:
         ser, prompt_output = run_shell_command_resilient(ser, "")
         ser, help_output = run_shell_command_resilient(ser, "help")
         ser, version_output = run_shell_command_resilient(ser, "kernel version")
+        ser, app_version_output = run_shell_command_resilient(ser, "version")
         ser, led_on_output = run_shell_command_resilient(ser, "leds on green")
         ser, led_status_output = run_shell_command_resilient(ser, "leds status green")
         ser, led_off_output = run_shell_command_resilient(ser, "leds off all")
@@ -784,9 +785,10 @@ def attempt_validation(attempt: int) -> bool:
         print(f"--- host http GET /api/v1/io after off ---")
         print(host_http_io_after_off_output.strip())
 
-        hello_ok = "Hello World!" in transcript
-        blink_start_ok = "Blink threads started for yellow" in transcript
-        http_start_ok = "HTTP server listening on http://" in transcript
+        app_version_ok = (
+            "zephyr-hello-shell" in app_version_output
+            and "Build time:" in app_version_output
+        )
         prompt_ok = "uart:~$" in transcript or "uart:~$" in prompt_output
         help_ok = "Available commands:" in help_output
         version_ok = re.search(r"Zephyr version\s+\S+", version_output) is not None
@@ -875,9 +877,7 @@ def attempt_validation(attempt: int) -> bool:
         )
 
         print("--- summary ---")
-        print(f"hello_ok={hello_ok}")
-        print(f"blink_start_ok={blink_start_ok}")
-        print(f"http_start_ok={http_start_ok}")
+        print(f"app_version_ok={app_version_ok}")
         print(f"prompt_ok={prompt_ok}")
         print(f"help_ok={help_ok}")
         print(f"version_ok={version_ok}")
@@ -899,9 +899,7 @@ def attempt_validation(attempt: int) -> bool:
         print(f"host_http_led_off_ok={host_http_led_off_ok}")
         print(f"host_http_io_after_off_ok={host_http_io_after_off_ok}")
         return (
-            hello_ok
-            and blink_start_ok
-            and http_start_ok
+            app_version_ok
             and prompt_ok
             and help_ok
             and version_ok

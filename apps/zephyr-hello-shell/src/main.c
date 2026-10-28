@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/shell/shell_string_conv.h>
 
@@ -15,6 +16,8 @@
 #include "camera_stream.h"
 #include "http_server.h"
 #include "speech_service.h"
+
+LOG_MODULE_REGISTER(app, LOG_LEVEL_DBG);
 
 extern int board_usb_host_start(void);
 
@@ -243,66 +246,66 @@ int main(void)
 	http_host = CONFIG_NET_CONFIG_MY_IPV4_ADDR;
 #endif
 
-	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
-	printf("Build time: %s\n", APP_BUILD_TIMESTAMP);
+	LOG_INF("Hello World! %s", CONFIG_BOARD_TARGET);
+	LOG_INF("Build time: %s", APP_BUILD_TIMESTAMP);
 
 	if (ret != 0) {
-		printf("Board I/O initialization failed: %d\n", ret);
+		LOG_ERR("Board I/O initialization failed: %d", ret);
 		return ret;
 	}
 
 	ret = board_blink_threads_start();
 	if (ret != 0) {
-		printf("Blink thread startup failed: %d\n", ret);
+		LOG_ERR("Blink thread startup failed: %d", ret);
 		return ret;
 	}
 
-	printf("Blink threads started for yellow (%u ms) and red (%u ms)\n",
+	LOG_INF("Blink threads started for yellow (%u ms) and red (%u ms)",
 	       board_led_info_get(BOARD_LED_YELLOW)->blink_period_ms,
 	       board_led_info_get(BOARD_LED_RED)->blink_period_ms);
 
 	ret = board_http_server_start();
 	if (ret != 0) {
-		printf("HTTP server startup failed: %d\n", ret);
+		LOG_ERR("HTTP server startup failed: %d", ret);
 		return ret;
 	}
 
-	printf("HTTP server listening on http://%s:%u/\n",
+	LOG_INF("HTTP server listening on http://%s:%u/",
 	       http_host, board_http_server_port());
 
 	ret = board_usb_host_start();
 	if (ret != 0) {
 #ifdef APP_SIMULATED_HW
 		if (ret == -ENOTSUP) {
-			printf("USB host unsupported in simulation\n");
+			LOG_INF("USB host unsupported in simulation");
 		} else {
-			printf("USB host startup failed: %d\n", ret);
+			LOG_ERR("USB host startup failed: %d", ret);
 		}
 #else
-		printf("USB host startup failed: %d\n", ret);
+		LOG_ERR("USB host startup failed: %d", ret);
 #endif
 		/* Non-fatal: continue running LEDs/HTTP even if USB host init failed. */
 	}
 
 	ret = speech_service_start();
 	if (ret != 0 && ret != -ENOTSUP) {
-		printf("Speech recognition startup failed: %d\n", ret);
+		LOG_ERR("Speech recognition startup failed: %d", ret);
 	}
 
 	ret = camera_stream_start();
 	if (ret != 0) {
-		printf("Camera stream startup failed: %d\n", ret);
+		LOG_ERR("Camera stream startup failed: %d", ret);
 		/* Non-fatal: continue running LEDs/HTTP even if the stream failed. */
 	} else {
-		printf("Camera stream listening on http://%s:%u/\n",
+		LOG_INF("Camera stream listening on http://%s:%u/",
 		       http_host, camera_stream_port());
 	}
 
 	ret = audio_stream_start();
 	if (ret != 0) {
-		printf("Microphone stream startup failed: %d\n", ret);
+		LOG_ERR("Microphone stream startup failed: %d", ret);
 	} else {
-		printf("Microphone stream listening on http://%s:8082/\n", http_host);
+		LOG_INF("Microphone stream listening on http://%s:8082/", http_host);
 	}
 
 	return 0;

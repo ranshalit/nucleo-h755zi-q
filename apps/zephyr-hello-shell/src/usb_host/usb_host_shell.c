@@ -22,6 +22,8 @@
 extern USBH_ClassTypeDef usb_boot_mouse_class;
 extern USBH_ClassTypeDef usb_audio_capture_class;
 
+LOG_MODULE_REGISTER(stm32_usbh, LOG_LEVEL_DBG);
+
 #define USB_HOST_POLL_THREAD_STACK_SIZE 2048
 #define USB_HOST_POLL_THREAD_PRIORITY 10
 #define USB_HOST_POLL_PERIOD_MS 1
@@ -111,13 +113,13 @@ static void usb_host_user_process(USBH_HandleTypeDef *phost, uint8_t id)
 
 	switch (id) {
 	case HOST_USER_CONNECTION:
-		printf("ST USBH: device connected\n");
+		LOG_INF("device connected");
 		break;
 	case HOST_USER_DISCONNECTION:
-		printf("ST USBH: device disconnected\n");
+		LOG_INF("device disconnected");
 		break;
 	case HOST_USER_UNRECOVERED_ERROR:
-		printf("ST USBH: unrecovered error\n");
+		LOG_ERR("unrecovered error");
 		break;
 	default:
 		break;
@@ -134,7 +136,7 @@ static void usb_host_process_step(void)
 		atomic_set(&usb_host_config_ready, 0);
 	}
 	if (usb_host.gState == HOST_CHECK_CLASS && usb_host.ClassNumber == 0U) {
-		printf("ST USBH: enumeration complete; no class driver registered\n");
+		LOG_WRN("enumeration complete; no class driver registered");
 		usb_host.gState = HOST_ABORT_STATE;
 	}
 }
@@ -166,17 +168,17 @@ static void usb_host_event_iteration(void)
 	usb_host_events_snapshot(&stats);
 	if (stats.overflows != 0U && !usb_host_event_fault) {
 		usb_host_event_fault = true;
-		printf("ST USBH: event FIFO overflow (%lu type=%lu irq=%lu urb=%lu); "
-		       "stopping host; reset required\n",
+		LOG_ERR("event FIFO overflow (%lu type=%lu irq=%lu urb=%lu); "
+		       "stopping host; reset required",
 		       (unsigned long)stats.overflows,
 		       (unsigned long)stats.last_overflow_type,
 		       (unsigned long)stats.irq_events, (unsigned long)stats.urb_events);
 		if (usb_host.pActiveClass != NULL &&
 		    usb_host.pActiveClass->DeInit(&usb_host) != USBH_OK) {
-			printf("ST USBH: class teardown failed after FIFO overflow\n");
+			LOG_ERR("class teardown failed after FIFO overflow");
 		}
 		if (USBH_Stop(&usb_host) != USBH_OK) {
-			printf("ST USBH: host stop failed after FIFO overflow\n");
+			LOG_ERR("host stop failed after FIFO overflow");
 		}
 		usb_host.gState = HOST_ABORT_STATE;
 	}

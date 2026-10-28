@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+LOG_MODULE_REGISTER(speech, LOG_LEVEL_DBG);
 static struct k_spinlock lock;
 static struct speech_snapshot status = {
 	.state = SPEECH_UNAVAILABLE, .reason = "speech recognition unavailable in simulation",
@@ -139,7 +141,7 @@ static void model_error(int ret)
 	status.reason = "model initialization or inference failed; see UART log";
 	invalidate_locked();
 	k_spin_unlock(&lock, key);
-	printk("speech: model failed: %d\n", ret);
+	LOG_ERR("model failed: %d", ret);
 }
 
 static void run_worker(void *a, void *b, void *c)
@@ -147,7 +149,7 @@ static void run_worker(void *a, void *b, void *c)
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
 	int ret = speech_model_init();
 	if (ret) { model_error(ret); return; }
-	printk("speech: English keyword model (" SPEECH_WORDS ") ready; arenas frontend=%u classifier=%u\n",
+	LOG_INF("English keyword model (" SPEECH_WORDS ") ready; arenas frontend=%u classifier=%u",
 		(unsigned)speech_model_arena_used(true), (unsigned)speech_model_arena_used(false));
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	model_ready = true;

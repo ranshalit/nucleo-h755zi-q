@@ -5,10 +5,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #include "usbh_core.h"
 #include "usbh_ctlreq.h"
 #include "usbh_pipes.h"
+
+LOG_MODULE_REGISTER(usb_mouse, LOG_LEVEL_DBG);
 
 #define HID_CLASS 0x03U
 #define HID_BOOT_SUBCLASS 0x01U
@@ -74,17 +77,17 @@ static USBH_StatusTypeDef mouse_init(USBH_HandleTypeDef *host)
 	if (usb_function_select(host->device.CfgDesc_Raw,
 				sizeof(host->device.CfgDesc_Raw), &sel) != 0 ||
 	    sel.kind != USB_FUNCTION_BOOT_MOUSE) {
-		printf("ST USBH: unsupported HID interface (boot mouse required)\n");
+		LOG_WRN("unsupported HID interface (boot mouse required)");
 		return USBH_FAIL;
 	}
 	if (sel.packet_size > MOUSE_REPORT_MAX_SIZE) {
-		printf("ST USBH: boot mouse interrupt-IN endpoint missing or invalid\n");
+		LOG_ERR("boot mouse interrupt-IN endpoint missing or invalid");
 		return USBH_FAIL;
 	}
 
 	mouse.pipe = USBH_AllocPipe(host, sel.endpoint);
 	if (mouse.pipe == 0xffU) {
-		printf("ST USBH: no free pipe for boot mouse\n");
+		LOG_ERR("no free pipe for boot mouse");
 		return USBH_FAIL;
 	}
 	mouse.allocated = true;
@@ -95,7 +98,7 @@ static USBH_StatusTypeDef mouse_init(USBH_HandleTypeDef *host)
 	if (USBH_LL_OpenPipe(host, mouse.pipe, mouse.endpoint, host->device.address,
 			     host->device.speed, USBH_EP_INTERRUPT,
 			     mouse.packet_size) != USBH_OK) {
-		printf("ST USBH: failed to open boot mouse pipe\n");
+		LOG_ERR("failed to open boot mouse pipe");
 		USBH_FreePipe(host, mouse.pipe);
 		mouse.allocated = false;
 		return USBH_FAIL;
@@ -135,10 +138,10 @@ static USBH_StatusTypeDef mouse_requests(USBH_HandleTypeDef *host)
 
 		mouse_snapshot.connected = true;
 		k_spin_unlock(&snapshot_lock, key);
-		printf("ST USBH: boot mouse ready on EP 0x%02x (interval %u ms)\n",
+		LOG_INF("boot mouse ready on EP 0x%02x (interval %u ms)",
 		       mouse.endpoint, mouse.interval);
 	} else if (result != USBH_BUSY) {
-		printf("ST USBH: boot mouse SET_PROTOCOL failed: %u\n", result);
+		LOG_ERR("boot mouse SET_PROTOCOL failed: %u", result);
 		return USBH_FAIL;
 	}
 	return result;
@@ -156,7 +159,7 @@ static USBH_StatusTypeDef mouse_process(USBH_HandleTypeDef *host)
 			mouse.pending = false;
 			if (length > mouse.packet_size ||
 			    !usb_boot_mouse_decode(mouse.data, length, &report)) {
-				printf("ST USBH: invalid boot mouse report length %lu\n",
+				LOG_ERR("invalid boot mouse report length %lu",
 				       (unsigned long)length);
 				host->gState = HOST_ABORT_STATE;
 				return USBH_FAIL;
@@ -170,7 +173,7 @@ static USBH_StatusTypeDef mouse_process(USBH_HandleTypeDef *host)
 			mouse.errors = 0U;
 			if (report.buttons != 0U || report.x != 0 ||
 			    report.y != 0 || report.wheel != 0) {
-				printf("ST USBH: mouse buttons=%u dx=%d dy=%d wheel=%d\n",
+				LOG_DBG("mouse buttons=%u dx=%d dy=%d wheel=%d",
 				       report.buttons, report.x, report.y, report.wheel);
 			}
 			mouse.next_poll = host->Timer + mouse.interval;
@@ -180,14 +183,14 @@ static USBH_StatusTypeDef mouse_process(USBH_HandleTypeDef *host)
 			mouse.next_poll = host->Timer + mouse.interval;
 		} else if (state == USBH_URB_ERROR &&
 			   ++mouse.errors <= MOUSE_MAX_TRANSFER_ERRORS) {
-			printf("ST USBH: mouse interrupt-IN error %u/%u; retrying\n",
+			LOG_WRN("mouse interrupt-IN error %u/%u; retrying",
 			       mouse.errors, MOUSE_MAX_TRANSFER_ERRORS);
 			mouse.pending = false;
 			mouse.next_poll = host->Timer + mouse.interval;
 		} else if (state == USBH_URB_STALL || state == USBH_URB_ERROR ||
 			   (host->Timer - mouse.transfer_start) >
 			   MOUSE_TRANSFER_TIMEOUT_MS) {
-			printf("ST USBH: mouse interrupt-IN failed: URB=%u\n", state);
+			LOG_ERR("mouse interrupt-IN failed: URB=%u", state);
 			host->gState = HOST_ABORT_STATE;
 			return USBH_FAIL;
 		}
@@ -202,7 +205,7 @@ static USBH_StatusTypeDef mouse_process(USBH_HandleTypeDef *host)
 						       USBH_PID_DATA, mouse.data,
 						       mouse.packet_size, 0U);
 	if (result != USBH_OK) {
-		printf("ST USBH: mouse interrupt-IN submission failed: %u\n", result);
+		LOG_ERR("mouse interrupt-IN submission failed: %u", result);
 		host->gState = HOST_ABORT_STATE;
 		return USBH_FAIL;
 	}
