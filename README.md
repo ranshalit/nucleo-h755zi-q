@@ -694,66 +694,6 @@ scripts and SDK GDB. For nonstandard installs, set `ZEPHYR_SDK_ROOT`,
 not communicating; the ELF can still be built, but hardware debugging cannot
 start until the probe connection works.
 
-### Boot-time measurement
-
-When measuring boot time for this Zephyr image, exclude flash/programming time
-and measure only from a hardware reset to a usable serial shell prompt.
-
-The manual procedure below is wrapped in:
-
-```bash
-scripts/measure_zephyr_boot_time.sh
-```
-
-Useful options:
-
-```bash
-scripts/measure_zephyr_boot_time.sh --samples 10
-scripts/measure_zephyr_boot_time.sh --json
-scripts/measure_zephyr_boot_time.sh --verbose
-```
-
-The script assumes the board is already running the image you want to measure.
-If you want to re-program the current Zephyr app first, run
-`scripts/flash_zephyr_hello_shell.sh --flash-only --skip-validate` before
-measuring.
-
-Before measuring, the script now terminates same-user processes that already
-hold the UART port, such as `minicom`. If the port is still busy afterward, it
-fails with a clear error showing the blocking process.
-
-The measurement used in this repo is:
-
-1. Program the image once so the board is already running the expected build.
-2. Issue a hardware reset with STM32CubeProgrammer:
-
-   ```bash
-   PROG=/opt/st/stm32cubeide_2.1.1/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.400.202601091506/tools/bin/STM32_Programmer_CLI
-   "$PROG" -c port=SWD mode=UR reset=HWrst freq=8000 -hardRst
-   ```
-
-3. Re-open the ST-LINK VCP at `115200 8N1` and capture the UART stream.
-4. Treat the first usable `uart:~$` prompt as "boot complete". In practice the
-   boot banner and prompt can arrive interleaved on the wire, so sending one
-   newline probe after the banner is acceptable if you need the shell to redraw
-   a clean prompt.
-5. Immediately run `kernel uptime`. That value is the board-side boot time from
-   Zephyr's point of view, while the external stopwatch includes small host-side
-   reset and serial reopen overhead.
-6. Repeat the reset several times and report mean/min/max rather than relying
-   on a single sample.
-
-Using that method on this setup, five reset cycles produced:
-
-- host-observed `hard reset -> uart:~$`: mean `813.7 ms`, min `810.3 ms`, max
-  `820.0 ms`
-- board-reported `kernel uptime` when the prompt was usable: mean `748.4 ms`,
-  min `737 ms`, max `764 ms`
-
-The second number is the better estimate of firmware boot time. The difference
-between the two numbers is mostly host-side reset command and serial reconnect
-latency.
-
 ### Ethernet validation
 
 The Zephyr app also enables the on-board Ethernet MAC/PHY with a static IPv4
@@ -1595,3 +1535,36 @@ scripts/flash_gpio_demo.sh --config Release
 - add 2 process leds
 - add ip
 - add heep server
+
+
+## short tutorial
+export PATH="/opt/st/stm32cubeide_2.1.1/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.400.202601091506/tools/bin:$PATH"
+create virtual python env
+python3 -m venv .venv
+source ~/.venvs/zephyr-4.4/bin/activate
+pip install west
+west init
+west update
+
+west sdk install
+export PATH="/opt/st/stm32cubeide_2.1.1/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.400.202601091506/tools/bin:$PATH"
+
+west build -b nucleo_h755zi_q/stm32h755xx/m7 samples/basic/blinky -d build/blinky -p always
+west flash   -d build/hello_world_h755_m7
+
+west build -b nucleo_h755zi_q/stm32h755xx/m7 samples/hello_world -d build/hello_world_h755_m7 -p always
+west flash   -d build/hello_world_h755_m7
+
+west build -b qemu_x86 samples/hello_world -d build/hello_world_h755_m7_qemu -p always
+west build -t run -d build/hello_world_h755_m7_qemu 
+
+west build -b native_sim/native/64 samples/hello_world samples/hello_world -d build/hello_world_h755_m7_native -p always
+west build  -t run -d build/hello_world_h755_m7_native
+
+(zephyr-4.4) ranshal@D-P-RANSHAL-L-RF:~/project/test/zephyr$ west boards | grep nucle | grep 755
+nucleo_h755zi_q
+(zephyr-4.4) ranshal@D-P-RANSHAL-L-RF:~/project/test/zephyr$ west boards --board nucleo_h755zi_q
+nucleo_h755zi_q
+(zephyr-4.4) ranshal@D-P-RANSHAL-L-RF:~/project/test/zephyr$ west boards --board nucleo_h755zi_q -a
+nucleo_h755zi_q/stm32h755xx/m7
+nucleo_h755zi_q/stm32h755xx/m4
