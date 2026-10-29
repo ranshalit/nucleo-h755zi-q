@@ -15,6 +15,7 @@ SWD_FREQ="${STM32_PROGRAMMER_SWD_FREQ:-8000}"
 PORT="${ZEPHYR_UART_PORT:-}"
 VALIDATION_RETRIES="${ZEPHYR_UART_VALIDATION_RETRIES:-3}"
 ZEPHYR_SDK_ROOT="${ZEPHYR_SDK_ROOT:-}"
+TRACE_FORMAT=ctf
 HOST_IPV4_ADDR="${ZEPHYR_HOST_IPV4_ADDR:-192.168.55.100}"
 BOARD_IPV4_ADDR="${ZEPHYR_BOARD_IPV4_ADDR:-192.168.55.2}"
 BOARD_IPV4_NETMASK="${ZEPHYR_BOARD_IPV4_NETMASK:-255.255.255.0}"
@@ -34,6 +35,7 @@ Options:
   --flash-only          Flash only.
   --validate-only       Validate UART, Ethernet, and HTTP behavior only.
   --skip-validate       Build and/or flash without runtime validation.
+  --trace-format FORMAT Select ctf (default) or percepio.
   --build-dir PATH      Override the Zephyr build directory.
   --app-dir PATH        Override the external Zephyr app directory.
   --zephyr-base PATH    Override the Zephyr base directory.
@@ -109,6 +111,11 @@ while [[ $# -gt 0 ]]; do
     --skip-validate)
       DO_VALIDATE=0
       ;;
+    --trace-format)
+      shift
+      [[ $# -gt 0 ]] || die "--trace-format requires ctf or percepio"
+      TRACE_FORMAT="$1"
+      ;;
     --build-dir)
       shift
       [[ $# -gt 0 ]] || die "--build-dir requires a value"
@@ -170,6 +177,19 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+TRACE_CONF_FILE=""
+case "${TRACE_FORMAT}" in
+  ctf)
+    ;;
+  percepio)
+    TRACE_CONF_FILE="${APP_DIR}/conf/percepio-view.conf"
+    [[ -f "${TRACE_CONF_FILE}" ]] || die "Percepio config not found: ${TRACE_CONF_FILE}"
+    ;;
+  *)
+    die "unknown trace format: ${TRACE_FORMAT} (use ctf or percepio)"
+    ;;
+esac
+
 [[ -d "${ZEPHYR_BASE}" ]] || die "Zephyr base not found: ${ZEPHYR_BASE}"
 [[ -d "${APP_DIR}" ]] || die "Zephyr app not found: ${APP_DIR}"
 if [[ "${DO_FLASH}" -eq 1 || "${DO_VALIDATE}" -eq 1 ]]; then
@@ -219,6 +239,9 @@ build_app() {
       toolchain_args+=("-DTOOLCHAIN_HAS_PICOLIBC=ON")
       toolchain_args+=("-DCONFIG_TOOLCHAIN_CROSS_COMPILE_SUPPORTS_THREAD_LOCAL_STORAGE=y")
     fi
+  fi
+  if [[ "${TRACE_FORMAT}" == percepio ]]; then
+    toolchain_args+=("-DEXTRA_CONF_FILE=${TRACE_CONF_FILE}")
   fi
   log "building ${APP_DIR} for ${BOARD}"
   if [[ -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
