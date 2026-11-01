@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Zephyr M7 (ST-LINK, build and debug)",
+            "name": "Zephyr M7 (ST-LINK, attach)",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/zephyr-hello-shell/zephyr/zephyr.elf",
@@ -13,7 +13,6 @@
             "useExtendedRemote": true,
             "stopAtConnect": true,
             "launchCompleteCommand": "None",
-            "preLaunchTask": "Zephyr M7: build and flash",
             "debugServerPath": "${workspaceFolder}/scripts/debug_zephyr_hello_shell.sh",
             "debugServerArgs": "--connect-under-reset",
             "serverStarted": "Listening on port 3333 for gdb connections",

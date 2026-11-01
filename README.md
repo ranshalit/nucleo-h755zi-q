@@ -686,7 +686,7 @@ app is built with speed optimizations, so some variables may be reported as
 `<optimized out>` and source stepping may jump. Debugging M4 is not covered by
 this M7 configuration.
 
-#### VS Code debugging (build, flash, and debug)
+#### VS Code debugging (attach without rebuilding)
 
 Open the **repository root** as the VS Code workspace. Install the Microsoft
 **C/C++** extension and connect the board's ST-LINK USB. The workspace tasks
@@ -701,23 +701,32 @@ STM32CubeProgrammer session using the ST-LINK before starting.
 2. **Flash only:** after a successful build, select **Terminal > Run Task >
    Zephyr M7: flash**. This programs the workspace build through the ST-LINK,
    without running serial/network validation. The board must be connected.
-3. **Build, flash, and debug in one step:** select **Run and Debug >
-   Zephyr M7 (ST-LINK, build and debug)** and press F5. Its pre-launch task
-   builds and flashes in that order, then VS Code starts OpenOCD with
-   `--connect-under-reset`, connects GDB to port 3333 using the newly built
-   ELF, and pauses M7 at the reset vector. You do **not** need to start
-   OpenOCD separately for this configuration. A build or flash failure stops
-   the launch; inspect the task's terminal output. Connecting under reset is
-   required here: immediately after STM32CubeProgrammer starts the app, a
-   plain attach fails with `[stm32h7x.cm7] Examination failed` and VS Code
-   reports `Remote connection closed`. It needs JP3 `T_NRST` fitted.
+3. **Attach without rebuilding:** select **Run and Debug >
+   Zephyr M7 (ST-LINK, attach)** and press F5. VS Code starts OpenOCD
+   with `--connect-under-reset`, connects GDB to port 3333 using the existing
+   workspace ELF, and halts M7 without building or flashing. Connecting resets
+   the MCU and restarts the app and network connections; JP3 `T_NRST` must be
+   fitted. The ELF must match the firmware already on the board. You do
+   **not** need to start OpenOCD separately.
+   To update firmware, run **Terminal > Run Task > Zephyr M7: build and flash**
+   before attaching. Plain attach without reset can fail with
+   `[stm32h7x.cm7] Examination failed` or `Remote connection closed`, so the
+   configuration keeps connect-under-reset enabled.
 4. **Use breakpoints:** set one in
    `apps/zephyr-hello-shell/src/main.c`, then press F5 to continue; the
-   session starts at reset, so `main` breakpoints hit without an extra reset.
-   To restart, enter `-exec monitor reset halt` in VS Code's **Debug
-   Console**. Reset restarts the app and network connections. Inspect
-   Variables, Watch, Call Stack, and Breakpoints; use F10/F11 to step. Stop
+   session initially stops in `reset.S`, before `main`. Press F6 to pause
+   execution. To restart, enter `-exec monitor reset halt` in VS Code's
+   **Debug Console**, then press F5. Reset restarts the app and network
+   connections. Inspect Variables, Watch, Call Stack, and Breakpoints;
+   use F10/F11 to step. Stop
    the debug session when finished.
+
+The M7 board configuration enables `CONFIG_STM32_ENABLE_DEBUG_SLEEP_STOP` so
+Continue/Pause keeps working when Zephyr enters idle sleep (`WFI`). Without it,
+startup clears the sleep-debug bits and OpenOCD can lose access after Continue,
+reporting misleading double-fault lockups. This keeps debug clocks active in
+sleep/stop and increases idle power consumption. Changes to this setting need
+one manual build/flash; F5 still does not build or flash.
 
 The build task finds `west` under `~/.local/bin` and the SDK under
 `~/.local/zephyr-sdk-*`. The debugger launchers find STM32CubeIDE's OpenOCD
