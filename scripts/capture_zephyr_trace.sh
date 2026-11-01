@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 ELF="$REPO_ROOT/build/zephyr-hello-shell/zephyr/zephyr.elf"
 METADATA="$REPO_ROOT/vendor/zephyrproject/zephyr/subsys/tracing/ctf/tsdl/metadata"
+TRACE_FORMAT=ctf
 OUTPUT=""
 RESET=0
 SECONDS_ARG=""
@@ -23,11 +24,12 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 Usage: scripts/capture_zephyr_trace.sh [options]
 
-Capture the running STM32H755 M7's Zephyr CTF trace through ST-LINK.
+Capture the running STM32H755 M7's CTF or Percepio trace through ST-LINK.
 Starts and stops its own OpenOCD; do not start another debug server.
 Default: snapshot existing RAM recording without resetting or flashing.
 
   --reset          Reset board for a fresh boot recording (clears old trace).
+  --trace-format F Select ctf (default) or percepio; must match firmware/ELF.
   --seconds N      Wait N seconds after reset before capture (default: 20).
                    Requires --reset; accepts nonnegative decimal seconds.
   --elf FILE       ELF matching flashed firmware
@@ -39,10 +41,13 @@ Default: snapshot existing RAM recording without resetting or flashing.
 Requires Python 3 (host checks), Zephyr GDB, and STM32CubeIDE OpenOCD.
 Existing helper overrides apply: ZEPHYR_GDB, ZEPHYR_SDK_ROOT,
 CROSS_COMPILE, STM32_OPENOCD, STM32_OPENOCD_SCRIPTS.
-Use the Zephyr checkout/metadata matching the flashed firmware.
+Use the Zephyr checkout/metadata matching the flashed firmware for CTF.
+Percepio requires TraceRecorder's RAM ring-buffer stream port.
 
-Capture covers only M7. The finite RAM buffer stops recording when full:
+Capture covers only M7. CTF's RAM buffer stops recording when full.
+The Percepio View profile's circular buffer overwrites old events.
 --seconds is a delay before dumping, not guaranteed recording duration.
+CTF produces a Trace Compass directory; Percepio produces trace.bin for View.
 On capture errors, a recovery session attempts resume/detach; logs remain.
 EOF
       exit 0
@@ -51,18 +56,31 @@ EOF
       RESET=1
       shift
       ;;
-    --elf|--output|--seconds)
+    --elf|--output|--seconds|--trace-format)
       [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value"
       case "$1" in
         --elf) ELF="$2" ;;
         --output) OUTPUT="$2" ;;
         --seconds) SECONDS_ARG="$2" ;;
+        --trace-format) TRACE_FORMAT="$2" ;;
       esac
       shift 2
       ;;
     *) fail "unknown option: $1 (see --help)" ;;
   esac
 done
+
+case "$TRACE_FORMAT" in
+  ctf)
+    TRACE_FILE=channel0_0
+    PREFLIGHT_ARGS=(-ex 'p sizeof(ram_tracing)' -ex "p &'tracing_backend_ram.c'::pos")
+    ;;
+  percepio)
+    TRACE_FILE=trace.bin
+    PREFLIGHT_ARGS=(-ex 'p sizeof(*RecorderDataPtr)' -ex 'p &RecorderDataPtr')
+    ;;
+  *) fail "unknown trace format: $TRACE_FORMAT (use ctf or percepio)" ;;
+esac
 
 if [[ -n "$SECONDS_ARG" ]]; then
   [[ "$RESET" == 1 ]] || fail "--seconds requires --reset"
@@ -71,7 +89,9 @@ else
   SECONDS_ARG=20
 fi
 [[ -f "$ELF" ]] || fail "ELF not found: $ELF"
-[[ -f "$METADATA" ]] || fail "CTF metadata not found: $METADATA"
+if [[ "$TRACE_FORMAT" == ctf ]]; then
+  [[ -f "$METADATA" ]] || fail "CTF metadata not found: $METADATA"
+fi
 command -v python3 >/dev/null || fail "python3 not found"
 
 # Never attach to another session's server or stop a process we did not start.
@@ -100,9 +120,11 @@ OUTPUT="$(cd -- "$OUTPUT" && pwd -P)"
 LOG_DIR="$OUTPUT/.capture"
 mkdir "$LOG_DIR"
 ELF="$(cd -- "$(dirname -- "$ELF")" && pwd -P)/$(basename -- "$ELF")"
-cp -- "$METADATA" "$OUTPUT/metadata"
-printf 'ELF: %s\nReset: %s\nWait seconds (reset only): %s\n' \
-  "$ELF" "$RESET" "$SECONDS_ARG" > "$LOG_DIR/capture-info.txt"
+if [[ "$TRACE_FORMAT" == ctf ]]; then
+  cp -- "$METADATA" "$OUTPUT/metadata"
+fi
+printf 'ELF: %s\nTrace format: %s\nReset: %s\nWait seconds (reset only): %s\n' \
+  "$ELF" "$TRACE_FORMAT" "$RESET" "$SECONDS_ARG" > "$LOG_DIR/capture-info.txt"
 
 cleanup() {
   local status=$?
@@ -133,10 +155,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 if ! "$SCRIPT_DIR/gdb_zephyr_hello_shell.sh" "$ELF" -nx -batch \
-  -ex 'p sizeof(ram_tracing)' -ex "p &'tracing_backend_ram.c'::pos" \
+  "${PREFLIGHT_ARGS[@]}" \
   > "$LOG_DIR/preflight.log" 2>&1; then
   cat "$LOG_DIR/preflight.log" >&2
-  fail "GDB/ELF preflight failed; require matching ELF with RAM tracing symbols"
+  fail "GDB/ELF preflight failed; require matching $TRACE_FORMAT ELF with RAM tracing symbols"
 fi
 
 cat > "$LOG_DIR/capture.gdb" <<GDB
@@ -154,13 +176,43 @@ end
 # DBGMCU_CR: D3DBGCKEN | D1DBGCKEN | DBG_STOPD1 | DBG_SLEEPD1.
 monitor stm32h7x_dbgmcu_mmw 0x004 0x00600003 0
 monitor halt
-set \$trace_pos = 'tracing_backend_ram.c'::pos
-if \$trace_pos <= 0 || \$trace_pos > sizeof(ram_tracing)
-echo error: invalid trace position; check matching ELF, tracing configuration, and capture delay.\\n
+GDB
+
+if [[ "$TRACE_FORMAT" == ctf ]]; then
+  cat >> "$LOG_DIR/capture.gdb" <<'GDB'
+set $trace_pos = 'tracing_backend_ram.c'::pos
+if $trace_pos <= 0 || $trace_pos > sizeof(ram_tracing)
+echo error: invalid trace position; check matching ELF, tracing configuration, and capture delay.\n
 quit 1
 end
-dump binary memory channel0_0 ram_tracing (ram_tracing + \$trace_pos)
-printf "Captured %u/%u bytes\\n", \$trace_pos, sizeof(ram_tracing)
+dump binary memory channel0_0 ram_tracing (ram_tracing + $trace_pos)
+printf "Captured %u/%u bytes\n", $trace_pos, sizeof(ram_tracing)
+GDB
+else
+  cat >> "$LOG_DIR/capture.gdb" <<'GDB'
+set $trace_recorder = RecorderDataPtr
+if $trace_recorder == 0
+echo error: Percepio recorder is not initialized.\n
+quit 1
+end
+if $trace_recorder->xEventBuffer.uxSize != sizeof($trace_recorder->xEventBuffer.uiBuffer)
+echo error: invalid Percepio ring buffer size; check matching ELF and recorder initialization.\n
+quit 1
+end
+# These markers are initialized by the RingBuffer stream port (STM32 is little-endian).
+if *(unsigned int *)&$trace_recorder->START_MARKERS[0] != 0x08070605 || *(unsigned int *)&$trace_recorder->START_MARKERS[4] != 0x78777675 || *(unsigned int *)&$trace_recorder->START_MARKERS[8] != 0xf8f7f6f5
+echo error: invalid Percepio start markers; recorder initialization is incomplete.\n
+quit 1
+end
+if *(unsigned int *)&$trace_recorder->END_MARKERS[0] != 0x0d0c0b0a || *(unsigned int *)&$trace_recorder->END_MARKERS[4] != 0x74737271 || *(unsigned int *)&$trace_recorder->END_MARKERS[8] != 0xf4f3f2f1
+echo error: invalid Percepio end markers; recorder initialization is incomplete.\n
+quit 1
+end
+dump binary value trace.bin *RecorderDataPtr
+printf "Captured %u bytes\n", sizeof(*RecorderDataPtr)
+GDB
+fi
+cat >> "$LOG_DIR/capture.gdb" <<'GDB'
 monitor resume
 detach
 GDB
@@ -204,7 +256,11 @@ if ! (cd -- "$OUTPUT" && "$SCRIPT_DIR/gdb_zephyr_hello_shell.sh" "$ELF" \
   cat "$LOG_DIR/gdb.log" >&2
   fail "GDB capture failed; inspect board state if resume/detach also failed"
 fi
-[[ -s "$OUTPUT/channel0_0" ]] || fail "GDB produced no trace data"
+[[ -s "$OUTPUT/$TRACE_FILE" ]] || fail "GDB produced no trace data"
 CAPTURE_DONE=1
 cat "$LOG_DIR/gdb.log"
-printf '\nCapture saved: %s\nImport this directory as a CTF trace in Trace Compass.\n' "$OUTPUT"
+if [[ "$TRACE_FORMAT" == ctf ]]; then
+  printf '\nCapture saved: %s\nImport this directory as a CTF trace in Trace Compass.\n' "$OUTPUT"
+else
+  printf '\nCapture saved: %s\nOpen this snapshot file in Percepio View.\n' "$OUTPUT/$TRACE_FILE"
+fi

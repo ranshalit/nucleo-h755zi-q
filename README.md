@@ -163,7 +163,34 @@ if a trace type is requested. For the task timeline, follow the XML-analysis
 instructions below. Old imports pointing into a deleted build directory
 will not work; import the persistent capture instead.
 
-The M7 board build also records Zephyr scheduler/interrupt events as CTF in a
+For Percepio View, select Percepio for both the firmware build and capture.
+Build, flash and validate the Percepio firmware first:
+
+```bash
+scripts/run.sh hello board --trace-format percepio
+```
+
+Then snapshot its existing RAM recording using the ELF from that flashed build:
+
+```bash
+scripts/capture_zephyr_trace.sh --trace-format percepio \
+  --elf /tmp/stm32h7-zephyr-hello-shell/zephyr/zephyr.elf
+```
+
+Open the printed `trace.bin` file in Percepio View. The script dumps the complete
+TraceRecorder ring-buffer object, including metadata, and does not create CTF
+`metadata` or `channel0_0` files. Existing `--output`, reset and recovery options
+apply; add `--reset --seconds 20` to discard the old recording and wait after a
+fresh boot. Unlike CTF, this Percepio profile's 16 KiB event buffer overwrites
+old events when full, so a delayed snapshot shows the most recent events rather
+than necessarily the boot sequence. The file is larger than the event buffer
+because it includes the recorder's headers and object table.
+
+Both selectors default to CTF. The capture selector does not build, flash or
+change the firmware's tracing format. If using `--build-only`, flash that image
+before capturing; the supplied ELF must match the firmware running on the board.
+
+The default M7 board build records Zephyr scheduler/interrupt events as CTF in a
 16 KiB RAM buffer. This is a finite snapshot: recording stops when the buffer
 fills, and a reset clears it. To view it with the open-source Eclipse Trace
 Compass, flash the board, let it run briefly, then attach with

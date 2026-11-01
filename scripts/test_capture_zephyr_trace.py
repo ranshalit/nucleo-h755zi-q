@@ -50,9 +50,17 @@ def log(text):
     with open(os.environ["TEST_LOG"], "a") as f:
         f.write(text + "\n")
 if "-x" not in sys.argv:
+    expressions = []
     for index, value in enumerate(sys.argv):
         if value == "-ex":
-            log(sys.argv[index + 1])
+            expression = sys.argv[index + 1]
+            log(expression)
+            expressions.append(expression)
+    if "target extended-remote localhost:3333" not in expressions:
+        selected = "percepio" if any("RecorderDataPtr" in x for x in expressions) else "ctf"
+        if os.environ.get("TEST_ELF_FORMAT", selected) != selected:
+            print("No symbol for selected trace format", file=sys.stderr)
+            raise SystemExit(1)
     raise SystemExit(0)
 commands = Path(sys.argv[sys.argv.index("-x") + 1]).read_text()
 pos = int(os.environ.get("TEST_POS", "128"))
@@ -67,6 +75,15 @@ for command in commands.splitlines():
         continue
     if command.startswith("if $trace_pos"):
         skip = 0 < pos <= 16384
+        continue
+    if command == "if $trace_recorder == 0":
+        skip = os.environ.get("TEST_RECORDER_STATE") != "null"
+        continue
+    if command.startswith("if $trace_recorder->xEventBuffer"):
+        skip = os.environ.get("TEST_RECORDER_STATE") != "size"
+        continue
+    if command.startswith("if *(unsigned int *)"):
+        skip = os.environ.get("TEST_RECORDER_STATE") != "markers"
         continue
     if command == "end":
         skip = False
@@ -84,14 +101,21 @@ for command in commands.splitlines():
         print("timed out while waiting for target halted", file=sys.stderr)
         raise SystemExit(1)
     if command == "quit 1":
-        print("error: invalid trace position", file=sys.stderr)
+        message = ("error: invalid Percepio recorder"
+                   if "RecorderDataPtr" in commands else "error: invalid trace position")
+        print(message, file=sys.stderr)
         raise SystemExit(1)
-    if command.startswith("dump binary memory"):
+    if command.startswith(("dump binary memory", "dump binary value")):
         if os.environ.get("FAIL_DUMP"):
             print("memory read failed", file=sys.stderr)
             raise SystemExit(1)
-        data = (struct.pack("<IHI20s", 123456, 0x11, 0x24000000, b"demo")
-                if os.environ.get("TEST_VALID_CTF") else b"x" * pos)
+        if command.startswith("dump binary value"):
+            data = (b"\0" * 4 + bytes.fromhex("0506070875767778f5f6f7f8")
+                    + b"percepio events" + bytes.fromhex("0a0b0c0d71727374f1f2f3f4")
+                    + b"\0" * 4)
+        else:
+            data = (struct.pack("<IHI20s", 123456, 0x11, 0x24000000, b"demo")
+                    if os.environ.get("TEST_VALID_CTF") else b"x" * pos)
         # GDB's dump command splits on whitespace, keeping filename quotes.
         Path(command.split()[3]).write_bytes(data)
 """
@@ -189,6 +213,133 @@ else:
         positions = [calls.index(item) for item in ordered]
         self.assertEqual(positions, sorted(positions))
 
+    def test_percepio_snapshot(self):
+        result = self.run_capture("--trace-format", "percepio")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        trace = self.output / "trace.bin"
+        self.assertEqual(trace.read_bytes()[4:16], bytes.fromhex("0506070875767778f5f6f7f8"))
+        self.assertFalse((self.output / "metadata").exists())
+        self.assertFalse((self.output / "channel0_0").exists())
+        calls = self.calls()
+        self.assertIn("p sizeof(*RecorderDataPtr)", calls)
+        self.assertIn("dump binary value trace.bin *RecorderDataPtr", calls)
+        self.assertNotIn("p sizeof(ram_tracing)", calls)
+        self.assertNotIn("monitor reset", calls)
+        self.assertNotIn("sleep ", calls)
+        self.assertIn("monitor resume\ndetach", calls)
+        self.assertIn("openocd stopped", calls)
+        self.assertIn(str(trace), result.stdout)
+        self.assertIn("Percepio View", result.stdout)
+        self.assertIn("Trace format: percepio", (self.output / ".capture/capture-info.txt").read_text())
+
+    def test_percepio_reset_wait_order(self):
+        result = self.run_capture("--trace-format", "percepio", "--reset", "--seconds", "0.1",
+                                  extra_env={"TEST_IDLE_SLEEP": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.calls()
+        ordered = ["monitor reset halt", "monitor resume", "sleep 0.1",
+                   "\nmonitor halt", "dump binary value", "detach"]
+        positions = [calls.index(item) for item in ordered]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("set CONNECT_UNDER_RESET 1", calls)
+
+    def test_percepio_invalid_recorder_resumes_board(self):
+        for state in ("null", "size", "markers"):
+            with self.subTest(state=state):
+                output = self.root / state
+                result = self.run_capture("--trace-format", "percepio",
+                                          "--output", str(output),
+                                          extra_env={"TEST_RECORDER_STATE": state})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Percepio", result.stderr)
+                self.assertFalse((output / "trace.bin").exists())
+                self.assertIn("monitor resume\ndetach", self.calls())
+                self.assertIn("openocd stopped", self.calls())
+                self.assertNotIn("Capture saved:", result.stdout)
+
+    def test_percepio_dump_failure_resumes_board(self):
+        result = self.run_capture("--trace-format", "percepio",
+                                  extra_env={"FAIL_DUMP": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("memory read failed", result.stderr)
+        self.assertIn("monitor resume\ndetach", self.calls())
+        self.assertIn("openocd stopped", self.calls())
+        self.assertNotIn("Capture saved:", result.stdout)
+
+    def test_trace_format_mismatch_before_reset(self):
+        for selected, firmware in (("percepio", "ctf"), ("ctf", "percepio")):
+            with self.subTest(selected=selected):
+                result = self.run_capture("--trace-format", selected, "--reset",
+                                          "--output", str(self.root / selected),
+                                          extra_env={"TEST_ELF_FORMAT": firmware})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("preflight", result.stderr)
+                self.assertNotIn("openocd ", self.calls())
+                self.assertNotIn("monitor reset", self.calls())
+
+    @unittest.skipUnless(shutil.which("gcc") and shutil.which("gdb"),
+                         "host gcc/gdb not installed")
+    def test_percepio_dump_commands_with_real_gdb(self):
+        result = self.run_capture("--trace-format", "percepio")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        commands = (self.output / ".capture/capture.gdb").read_text()
+        start = commands.index("set $trace_recorder = RecorderDataPtr")
+        end = commands.index("\nmonitor resume", start)
+        gdb_script = self.root / "dump.gdb"
+        gdb_script.write_text(commands[start:end] + "\n")
+        source = self.root / "recorder.c"
+        source.write_text("""
+#include <stdint.h>
+struct RecorderData {
+    uint32_t reserved0;
+    uint8_t START_MARKERS[12];
+    struct { uint32_t uxSize; uint8_t uiBuffer[32]; } xEventBuffer;
+    uint8_t END_MARKERS[12];
+    uint32_t reserved1;
+};
+struct RecorderData fixture = {
+    .START_MARKERS = {5, 6, 7, 8, TEST_START, 0x76, 0x77, 0x78, 0xf5, 0xf6, 0xf7, 0xf8},
+    .xEventBuffer = {.uxSize = TEST_SIZE, .uiBuffer = {1, 2, 3}},
+    .END_MARKERS = {10, 11, 12, 13, 0x71, 0x72, 0x73, 0x74, TEST_END, 0xf2, 0xf3, 0xf4}
+};
+struct RecorderData *RecorderDataPtr __attribute__((section(".data"))) =
+    TEST_NULL ? 0 : &fixture;
+int main(void) { return 0; }
+""")
+        for state, null, size, start_marker, end_marker in (
+            ("valid", 0, 32, 0x75, 0xf1),
+            ("null", 1, 32, 0x75, 0xf1),
+            ("size", 0, 0, 0x75, 0xf1),
+            ("start", 0, 32, 0, 0xf1),
+            ("end", 0, 32, 0x75, 0),
+        ):
+            with self.subTest(state=state):
+                output = self.root / ("real-gdb-" + state)
+                output.mkdir()
+                elf = output / "fixture.elf"
+                compiled = subprocess.run(
+                    ["gcc", "-g", "-no-pie", "-DTEST_NULL=" + str(null),
+                     "-DTEST_SIZE=" + str(size), "-DTEST_START=" + str(start_marker),
+                     "-DTEST_END=" + str(end_marker), str(source), "-o", str(elf)],
+                    capture_output=True, text=True, timeout=15,
+                )
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                dumped = subprocess.run(
+                    ["gdb", "-nx", "-batch", str(elf), "-x", str(gdb_script)],
+                    cwd=output, capture_output=True, text=True, timeout=15,
+                )
+                trace = output / "trace.bin"
+                if state == "valid":
+                    self.assertEqual(dumped.returncode, 0, dumped.stderr)
+                    self.assertEqual(trace.stat().st_size, 68)
+                    self.assertEqual(trace.read_bytes()[4:16],
+                                     bytes.fromhex("0506070875767778f5f6f7f8"))
+                    self.assertEqual(trace.read_bytes()[20:23], b"\x01\x02\x03")
+                else:
+                    self.assertNotEqual(dumped.returncode, 0)
+                    self.assertIn("Percepio", dumped.stdout)
+                    self.assertFalse(trace.exists())
+
     def test_reset_default_wait(self):
         result = self.run_capture("--reset")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -207,6 +358,8 @@ else:
     def test_invalid_arguments_before_probe(self):
         for args in [
             ["--seconds"], ["--elf"], ["--output"], ["--bogus"],
+            ["--trace-format"], ["--trace-format", "unknown"],
+            ["--trace-format", "--reset"],
             ["--seconds", "5"], ["--reset", "--seconds", "-1"],
             ["--reset", "--seconds", "nan"], ["--reset", "--seconds", "inf"],
             ["--reset", "--seconds", "abc"],
