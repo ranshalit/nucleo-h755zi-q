@@ -43,6 +43,8 @@ Existing helper overrides apply: ZEPHYR_GDB, ZEPHYR_SDK_ROOT,
 CROSS_COMPILE, STM32_OPENOCD, STM32_OPENOCD_SCRIPTS.
 Use the Zephyr checkout/metadata matching the flashed firmware for CTF.
 Percepio requires TraceRecorder's RAM ring-buffer stream port.
+Keep the matching build directory beside its zephyr/ELF: generated
+syscalls-v*.xml definitions are copied into the Percepio capture directory.
 
 Capture covers only M7. CTF's RAM buffer stops recording when full.
 The Percepio View profile's circular buffer overwrites old events.
@@ -94,6 +96,18 @@ if [[ "$TRACE_FORMAT" == ctf ]]; then
 fi
 command -v python3 >/dev/null || fail "python3 not found"
 
+SYSCALL_DEFINITIONS=()
+if [[ "$TRACE_FORMAT" == percepio ]]; then
+  ELF_DIR="$(cd -- "$(dirname -- "$ELF")" && pwd -P)"
+  for definition in "$ELF_DIR"/../syscalls-v*.xml; do
+    [[ -s "$definition" ]] && SYSCALL_DEFINITIONS+=("$definition")
+  done
+  if [[ ${#SYSCALL_DEFINITIONS[@]} -eq 0 ]] &&
+    grep -qx 'CONFIG_PERCEPIO_TRC_CFG_USE_SYSCALL_EXTENSION=y' "$ELF_DIR/.config" 2>/dev/null; then
+    fail "Percepio syscall definitions missing from matching build directory: $ELF_DIR/..; restore syscalls-v*.xml from the flashed build before capturing"
+  fi
+fi
+
 # Never attach to another session's server or stop a process we did not start.
 python3 - <<'PY'
 import socket
@@ -122,6 +136,8 @@ mkdir "$LOG_DIR"
 ELF="$(cd -- "$(dirname -- "$ELF")" && pwd -P)/$(basename -- "$ELF")"
 if [[ "$TRACE_FORMAT" == ctf ]]; then
   cp -- "$METADATA" "$OUTPUT/metadata"
+elif [[ ${#SYSCALL_DEFINITIONS[@]} -gt 0 ]]; then
+  cp -- "${SYSCALL_DEFINITIONS[@]}" "$OUTPUT/"
 fi
 printf 'ELF: %s\nTrace format: %s\nReset: %s\nWait seconds (reset only): %s\n' \
   "$ELF" "$TRACE_FORMAT" "$RESET" "$SECONDS_ARG" > "$LOG_DIR/capture-info.txt"
@@ -263,4 +279,9 @@ if [[ "$TRACE_FORMAT" == ctf ]]; then
   printf '\nCapture saved: %s\nImport this directory as a CTF trace in Trace Compass.\n' "$OUTPUT"
 else
   printf '\nCapture saved: %s\nOpen this snapshot file in Percepio View.\n' "$OUTPUT/$TRACE_FILE"
+  if [[ ${#SYSCALL_DEFINITIONS[@]} -gt 0 ]]; then
+    printf 'In View settings, add this directory to Definition File Paths: %s\n' "$OUTPUT"
+  elif [[ ! -f "$ELF_DIR/.config" ]]; then
+    printf 'warning: matching build configuration unavailable; if View requests syscall definitions, add the flashed build'\''s syscalls-v*.xml to Definition File Paths.\n' >&2
+  fi
 fi

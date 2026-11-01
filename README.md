@@ -177,7 +177,14 @@ scripts/capture_zephyr_trace.sh --trace-format percepio \
   --elf /tmp/stm32h7-zephyr-hello-shell/zephyr/zephyr.elf
 ```
 
-Open the printed `trace.bin` file in Percepio View. The script dumps the complete
+In Percepio View settings, add the capture directory to **Definition File Paths**,
+then open the printed `trace.bin`. The script copies generated `syscalls-v*.xml`
+from the build directory above the supplied ELF's `zephyr/` directory. Keep
+these definitions with the trace: they map syscall IDs for that exact firmware
+build. When syscall extensions are enabled but definitions are missing, capture
+fails before connecting or resetting; restore them from the flashed build.
+
+The script dumps the complete
 TraceRecorder ring-buffer object, including metadata, and does not create CTF
 `metadata` or `channel0_0` files. Existing `--output`, reset and recovery options
 apply; add `--reset --seconds 20` to discard the old recording and wait after a

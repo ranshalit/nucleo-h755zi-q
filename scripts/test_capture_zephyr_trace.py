@@ -127,7 +127,13 @@ class CaptureTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.log = self.root / "calls"
-        self.elf = self.root / "matching image.elf"
+        self.build = self.root / "matching build"
+        zephyr = self.build / "zephyr"
+        zephyr.mkdir(parents=True)
+        (zephyr / ".config").write_text("CONFIG_PERCEPIO_TRC_CFG_USE_SYSCALL_EXTENSION=y\n")
+        self.definitions = self.build / "syscalls-v4.4.0.xml"
+        self.definitions.write_text("<PlatformExtension />\n")
+        self.elf = zephyr / "matching image.elf"
         self.elf.write_bytes(b"ELF fixture")
         self.output = self.root / "capture with spaces"
         configs = self.root / "openocd scripts"
@@ -231,6 +237,36 @@ else:
         self.assertIn(str(trace), result.stdout)
         self.assertIn("Percepio View", result.stdout)
         self.assertIn("Trace format: percepio", (self.output / ".capture/capture-info.txt").read_text())
+        self.assertTrue((self.output / self.definitions.name).is_file())
+        self.assertEqual((self.output / self.definitions.name).read_bytes(),
+                         self.definitions.read_bytes())
+        self.assertIn("Definition File Paths", result.stdout)
+        self.assertIn(str(self.output), result.stdout)
+
+    def test_percepio_missing_syscall_definitions_before_reset(self):
+        self.definitions.unlink()
+        result = self.run_capture("--trace-format", "percepio", "--reset")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("syscall definitions", result.stderr)
+        self.assertNotIn("openocd ", self.calls())
+        self.assertNotIn("monitor reset", self.calls())
+
+    def test_percepio_without_syscall_extension(self):
+        self.definitions.unlink()
+        (self.elf.parent / ".config").write_text(
+            "# CONFIG_PERCEPIO_TRC_CFG_USE_SYSCALL_EXTENSION is not set\n")
+        result = self.run_capture("--trace-format", "percepio")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.output / "trace.bin").is_file())
+
+    def test_ctf_does_not_require_or_copy_syscall_definitions(self):
+        result = self.run_capture()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.output / self.definitions.name).exists())
+        self.output = self.root / "no-definitions"
+        self.definitions.unlink()
+        result = self.run_capture()
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_percepio_reset_wait_order(self):
         result = self.run_capture("--trace-format", "percepio", "--reset", "--seconds", "0.1",
