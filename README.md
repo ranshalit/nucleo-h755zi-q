@@ -1593,7 +1593,7 @@ west sdk install
 export PATH="/opt/st/stm32cubeide_2.1.1/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.linux64_2.2.400.202601091506/tools/bin:$PATH"
 
 west build -b nucleo_h755zi_q/stm32h755xx/m7 samples/basic/blinky -d build/blinky -p always
-west flash   -d build/hello_world_h755_m7
+west flash   -d build/blinky
 
 west build -b nucleo_h755zi_q/stm32h755xx/m7 samples/hello_world -d build/hello_world_h755_m7 -p always
 west flash   -d build/hello_world_h755_m7
